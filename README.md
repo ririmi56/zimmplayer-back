@@ -41,6 +41,36 @@ et `<champ>` (ce qui est affiché, trié et recherché). Une correction est stoc
 à part et réappliquée après chaque scan ; la retirer restaure la valeur du
 fichier.
 
+## Image Docker
+
+Publiée sur GHCR à chaque push sur `master` (voir
+[`.github/workflows/docker.yml`](./.github/workflows/docker.yml)), en
+`linux/amd64` et `linux/arm64` :
+
+```bash
+docker pull ghcr.io/ririmi56/zimmplayer-back:latest
+```
+
+| Tag | Correspond à |
+|---|---|
+| `latest` | dernier commit sur `master` |
+| `X.Y.Z`, `X.Y` | tag Git `vX.Y.Z` |
+| `<sha court>` | un commit précis, pour figer ou revenir en arrière |
+
+Les migrations Alembic s'appliquent automatiquement au démarrage du conteneur
+(`docker-entrypoint.sh`) — rien à lancer à la main lors d'une mise à jour.
+
+Le conteneur écoute sur `:8000` et attend une base MariaDB et un MinIO déjà
+joignables. Variables d'environnement principales (voir
+[`.env.example`](./.env.example) pour la liste complète, y compris Snapcast) :
+
+| Variable | Rôle |
+|---|---|
+| `DATABASE_URL` | Connexion MariaDB, ex. `mysql+pymysql://user:pass@host:3306/db` |
+| `S3_ENDPOINT` | MinIO vu par l'API (interne) |
+| `S3_PUBLIC_BASE_URL` | MinIO vu par le **navigateur** (URLs présignées) — voir la section Architecture |
+| `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET` | Identifiants et bucket S3/MinIO |
+
 ## Développement
 
 Nécessite une base MariaDB et un MinIO déjà démarrés.

@@ -5,7 +5,9 @@
 Backend d'un lecteur de musique auto-hébergé pour une bibliothèque stockée sur
 S3/MinIO, conçu pour fonctionner sur un **réseau airgap** : aucune dépendance
 réseau externe à l'exécution. Le client web correspondant vit dans le dépôt
-sœur [`zimmplayer-front`](https://github.com/ririmi56/zimmplayer-front).
+sœur [`zimmplayer-front`](https://github.com/ririmi56/zimmplayer-front) ;
+l'orchestration Docker Compose et le livrable airgap, dans
+[`zimmplayer-deploy`](https://github.com/ririmi56/zimmplayer-deploy).
 
 Le bucket est organisé en `Artiste/Album/NN - Titre.ext`. Les métadonnées
 embarquées dans les fichiers sont indexées une fois en base, ce qui permet de

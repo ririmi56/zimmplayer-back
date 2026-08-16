@@ -1,5 +1,7 @@
 # Zimmplayer — API
 
+[![Docker](https://github.com/ririmi56/zimmplayer-back/actions/workflows/docker.yml/badge.svg)](https://github.com/ririmi56/zimmplayer-back/actions/workflows/docker.yml)
+
 Backend d'un lecteur de musique auto-hébergé pour une bibliothèque stockée sur
 S3/MinIO, conçu pour fonctionner sur un **réseau airgap** : aucune dépendance
 réseau externe à l'exécution. Le client web correspondant vit dans le dépôt

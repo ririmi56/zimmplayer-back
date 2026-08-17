@@ -191,9 +191,13 @@ async def stream_proxy(websocket: WebSocket) -> None:
         await websocket.close(code=1011, reason="Snapcast desactive")
         return
 
-    upstream_url = f"ws://{config['host']}:{config['http_port']}/stream"
+    # Meme hote, meme port et meme schema que le controle JSON-RPC : en
+    # wss:// derriere un proxy TLS, un ws:// code en dur se fait rejeter.
+    upstream_url, options = snapcast.ws_target(
+        config["host"], config["http_port"], "/stream"
+    )
     try:
-        upstream = await websockets.connect(upstream_url, max_size=None)
+        upstream = await websockets.connect(upstream_url, max_size=None, **options)
     except Exception as exc:
         logger.warning("flux snapcast injoignable (%s) : %s", upstream_url, exc)
         await websocket.close(code=1011, reason="snapserver injoignable")

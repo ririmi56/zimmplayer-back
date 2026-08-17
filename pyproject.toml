@@ -13,7 +13,7 @@ dependencies = [
     "boto3>=1.35",
     "mutagen>=1.47",
     "pillow>=11.0",
-    "websockets>=13.0",
+    "websockets>=14.0",
 ]
 
 [project.optional-dependencies]

@@ -57,6 +57,30 @@ def _ssl_context(ca_file: str) -> ssl.SSLContext:
     return ssl.create_default_context(cafile=ca_file or None)
 
 
+def ws_target(host: str, port: int, path: str) -> tuple[str, dict[str, Any]]:
+    """URI et options TLS pour joindre snapserver en WebSocket.
+
+    Partage par le controle JSON-RPC et par le relais audio `/stream` : les
+    deux passent par le meme hote et le meme port, donc par le meme schema.
+    Coder `ws://` en dur d'un cote et `wss://` de l'autre est le bug qu'on
+    evite ici.
+    """
+    settings = get_settings()
+    tls = settings.snapcast_tls
+    server_name = settings.snapcast_tls_server_name
+
+    uri = f"{'wss' if tls else 'ws'}://{host}:{port}{path}"
+    options: dict[str, Any] = {}
+    if tls:
+        options["ssl"] = _ssl_context(settings.snapcast_tls_ca_file)
+        # server_hostname porte le SNI *et* le nom verifie contre le
+        # certificat : il doit correspondre au CN/SAN, qui n'est pas forcement
+        # l'adresse par laquelle on joint le serveur.
+        if server_name:
+            options["server_hostname"] = server_name
+    return uri, options
+
+
 def call(
     host: str,
     port: int,
@@ -90,9 +114,6 @@ def call(
         payload["params"] = params
 
     uri = f"{'wss' if tls else 'ws'}://{host}:{port}/jsonrpc"
-    # server_hostname porte le SNI *et* le nom verifie contre le certificat :
-    # il doit correspondre au CN/SAN, qui n'est pas forcement l'adresse par
-    # laquelle on joint le serveur (cas d'une IP en airgap).
     options: dict[str, Any] = {}
     if tls:
         options["ssl"] = _ssl_context(ca_file)

@@ -40,6 +40,16 @@ class Settings(BaseSettings):
     # Plage de ports ouverts par l'API, un par session en mode snapcast.
     snapcast_port_start: int = 4960
     snapcast_port_count: int = 20
+    # Le port de controle de snapserver n'est pas chiffre : activer ceci
+    # suppose un terminateur TLS (stunnel, nginx `stream`) devant lui, et
+    # `snapcast_port` pointant sur ce terminateur.
+    snapcast_tls: bool = False
+    # Vide = magasin de certificats du systeme. En airgap, pointer ici le
+    # certificat de l'autorite maison.
+    snapcast_tls_ca_file: str = ""
+    # Nom verifie contre le certificat (et envoye en SNI). Vide = snapcast_host,
+    # a renseigner si l'on joint le serveur par IP.
+    snapcast_tls_server_name: str = ""
 
 
 @lru_cache

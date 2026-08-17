@@ -346,10 +346,10 @@ def provision(db: DbSession, session: Session) -> None:
         # Un AddStream en echec laisse malgre tout le nom enregistre cote
         # snapserver : on retire systematiquement avant d'ajouter.
         try:
-            snapcast.call(config["host"], config["port"], "Stream.RemoveStream", {"id": name})
+            snapcast.call(config["host"], config["http_port"], "Stream.RemoveStream", {"id": name})
         except snapcast.SnapcastError:
             pass
-        snapcast.call(config["host"], config["port"], "Stream.AddStream", {"streamUri": uri})
+        snapcast.call(config["host"], config["http_port"], "Stream.AddStream", {"streamUri": uri})
     except snapcast.SnapcastError:
         _drop(session.id)
         raise
@@ -365,7 +365,7 @@ def teardown(db: DbSession, session: Session) -> None:
         config = appsettings.snapcast_config(db)
         try:
             snapcast.call(
-                config["host"], config["port"],
+                config["host"], config["http_port"],
                 "Stream.RemoveStream", {"id": session.snapcast_stream_id},
             )
         except snapcast.SnapcastError as exc:

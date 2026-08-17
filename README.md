@@ -157,6 +157,52 @@ MinIO ──► ffmpeg -re ──► PCM s16le 48k ──► TCP ──► snaps
 C'est ce qui rend l'identification automatique : le navigateur *est* un client
 identifié, il n'y a rien à déclarer.
 
+### Un seul port vers snapserver
+
+L'API parle à snapserver par **deux canaux, sur le même port** — celui de son
+serveur HTTP intégré (`SNAPCAST_HTTP_PORT`, 1780 par défaut) :
+
+| Canal | Chemin | Qui s'en sert |
+|---|---|---|
+| Contrôle JSON-RPC 2.0 | `/jsonrpc` | `services/snapcast.call()` — volumes, groupes, flux |
+| Audio (protocole binaire) | `/stream` | relayé au navigateur par `/api/snapcast/stream` |
+
+Le **port de contrôle TCP 1705 n'est plus utilisé**. Il porte le même JSON-RPC,
+mais le serveur HTTP est le seul port exposé dans la plupart des déploiements,
+et il permet de tout faire passer par une WebSocket — donc par un reverse proxy
+TLS, ce qu'un socket TCP brut ne permet pas aussi simplement. Les deux canaux
+sont construits par la même fonction (`snapcast.ws_target`) : c'est ce qui
+garantit qu'ils visent le même serveur avec le même schéma, un `ws://` codé en
+dur d'un côté suffisant à casser tout le mode TLS.
+
+Une connexion par appel, volontairement : le contrôle est peu sollicité, et
+cela évite un thread lecteur, une machine à états de reconnexion et un cache à
+invalider. Snapserver entrelaçant ses notifications avec les réponses, chaque
+réponse est retrouvée par son `id`.
+
+### TLS vers snapserver
+
+Snapserver ne chiffre rien lui-même : `SNAPCAST_TLS=true` suppose un **reverse
+proxy TLS devant lui**, avec `SNAPCAST_HTTP_PORT` pointant sur ce proxy. Les
+deux canaux passent alors en `wss://`.
+
+| Variable | Rôle |
+|---|---|
+| `SNAPCAST_TLS` | Passe le contrôle et l'audio en `wss://` |
+| `SNAPCAST_TLS_CA_FILE` | Vide = magasin système. En airgap, le certificat de **votre** autorité |
+| `SNAPCAST_TLS_SERVER_NAME` | Nom vérifié contre le certificat, et SNI. Vide = `SNAPCAST_HOST` |
+
+Le certificat est toujours vérifié — il n'y a volontairement pas d'option pour
+désactiver ce contrôle : un contrôle non authentifié laisserait piloter les
+enceintes par n'importe quel serveur répondant sur le port. En airgap, la
+réponse est de renseigner `SNAPCAST_TLS_CA_FILE`. Renseigner
+`SNAPCAST_TLS_SERVER_NAME` quand on joint le serveur par IP mais que le
+certificat porte un nom.
+
+**Ces trois réglages ne sont pas modifiables à chaud** depuis l'écran
+Configuration, contrairement à l'hôte, au port et à l'adresse annoncée : ils
+sont lus dans l'environnement, donc changés par redéploiement.
+
 ### Vocabulaire : un groupe n'est pas une pièce
 
 Snapcast connaît trois objets, et aucun ne représente un lieu :
@@ -195,8 +241,13 @@ Rien à modifier dans `snapserver.conf` : chaque session enregistre son flux à 
 chaud via `Stream.AddStream`, en `mode=client` — c'est **snapserver qui vient se
 connecter** à un port ouvert par l'API. Il faut donc que :
 
+- `SNAPCAST_HOST` et `SNAPCAST_HTTP_PORT` désignent le serveur HTTP de
+  snapserver, vu depuis l'API (contrôle *et* audio, voir plus haut) ;
 - `SNAPCAST_ADVERTISE_HOST` désigne l'adresse de l'API **vue depuis snapserver** ;
 - la plage `SNAPCAST_PORT_START`…`_COUNT` soit joignable depuis lui.
+
+Attention au sens de chaque flèche : les deux premiers réglages disent comment
+**joindre** snapserver, les deux suivants comment snapserver **nous** joint.
 
 Pièges rencontrés à l'implémentation, et traités dans le code :
 
@@ -205,8 +256,8 @@ Pièges rencontrés à l'implémentation, et traités dans le code :
   donc résolu en IP avant d'être transmis.
 - un `Stream.AddStream` en échec **laisse malgré tout le nom enregistré** : on
   retire systématiquement avant d'ajouter.
-- snapserver **entrelace ses notifications avec les réponses** sur la socket de
-  contrôle ; les réponses sont corrélées par `id`, le reste est ignoré.
+- snapserver **entrelace ses notifications avec les réponses** sur la même
+  connexion ; les réponses sont corrélées par `id`, le reste est ignoré.
 - l'en-tête binaire fait **26 octets** ; s'y tromper ne produit pas une erreur
   propre mais **fait segfauter snapserver 0.29** (constaté). Un test verrouille
   cette valeur.

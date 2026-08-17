@@ -9,8 +9,9 @@ threads.
 On passe par le serveur HTTP integre de snapserver (port 1780 par defaut, celui
 qui sert aussi Snapweb et le flux audio `/stream`) plutot que par le port de
 controle TCP 1705 : c'est le seul port expose en production, et il porte
-exactement le meme JSON-RPC. Consequence : `snapcast_port`/1705 n'est plus
-utilise nulle part.
+exactement le meme JSON-RPC. Consequence : l'API ne connait plus qu'un seul
+port de snapserver (`snapcast_http_port`) ; 1705 ne sert plus a rien, et le
+reglage correspondant a ete retire.
 
 Attention : snapserver entrelace ses notifications avec les reponses sur la
 meme connexion. Il faut donc lire message par message jusqu'a trouver celui qui
@@ -87,38 +88,18 @@ def call(
     method: str,
     params: dict[str, Any] | None = None,
     timeout: float = DEFAULT_TIMEOUT,
-    tls: bool | None = None,
-    ca_file: str | None = None,
-    server_name: str | None = None,
 ) -> Any:
     """Un appel JSON-RPC, une connexion.
 
     `port` est le port HTTP de snapserver (`http_port` dans la configuration),
     pas l'ancien port de controle TCP.
-
-    `tls`, `ca_file` et `server_name` valent par defaut la configuration
-    (`SNAPCAST_TLS...`) : les appelants n'ont rien a transmettre, seuls les
-    tests ont besoin de les forcer.
     """
-    settings = get_settings()
-    if tls is None:
-        tls = settings.snapcast_tls
-    if ca_file is None:
-        ca_file = settings.snapcast_tls_ca_file
-    if server_name is None:
-        server_name = settings.snapcast_tls_server_name
-
     request_id = next(_ids)
     payload: dict[str, Any] = {"id": request_id, "jsonrpc": "2.0", "method": method}
     if params:
         payload["params"] = params
 
-    uri = f"{'wss' if tls else 'ws'}://{host}:{port}/jsonrpc"
-    options: dict[str, Any] = {}
-    if tls:
-        options["ssl"] = _ssl_context(ca_file)
-        if server_name:
-            options["server_hostname"] = server_name
+    uri, options = ws_target(host, port, "/jsonrpc")
 
     try:
         with connect(
@@ -153,8 +134,9 @@ def call(
     # son message brut ("[SSL: CERTIFICATE_VERIFY_FAILED] ...") n'aide personne
     # dans l'interface.
     except ssl.SSLCertVerificationError as exc:
+        verified = get_settings().snapcast_tls_server_name or host
         raise SnapcastError(
-            f"certificat refuse par {server_name or host} : {exc.verify_message}"
+            f"certificat refuse par {verified} : {exc.verify_message}"
         ) from exc
     except ssl.SSLError as exc:
         raise SnapcastError(f"echec de la negociation TLS : {exc}") from exc

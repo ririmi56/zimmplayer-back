@@ -24,8 +24,8 @@ router = APIRouter(prefix="/api/snapcast", tags=["snapcast"])
 
 class SnapcastConfig(BaseModel):
     host: str = Field(min_length=1, max_length=255)
-    port: int = Field(ge=1, le=65535)
-    # Port HTTP/WebSocket de snapserver, par lequel passe l'audio du navigateur.
+    # Port HTTP/WebSocket de snapserver : il porte le controle JSON-RPC comme
+    # l'audio du navigateur. Seul port de snapserver que l'API utilise.
     http_port: int = Field(default=1780, ge=1, le=65535)
     enabled: bool
     advertise_host: str = Field(min_length=1, max_length=255)
@@ -76,7 +76,6 @@ def update_config(
     payload: SnapcastConfig, user: CurrentUser, db: DbSession = Depends(get_db)
 ) -> dict:
     appsettings.set_value(db, appsettings.SNAPCAST_HOST, payload.host)
-    appsettings.set_value(db, appsettings.SNAPCAST_PORT, str(payload.port))
     appsettings.set_value(db, appsettings.SNAPCAST_HTTP_PORT, str(payload.http_port))
     appsettings.set_value(db, appsettings.SNAPCAST_ENABLED, str(payload.enabled))
     appsettings.set_value(

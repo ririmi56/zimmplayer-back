@@ -61,7 +61,7 @@ def _call(db: DbSession, method: str, params: dict | None = None):
     if not config["enabled"]:
         raise HTTPException(status_code=409, detail="Snapcast est desactive")
     try:
-        return snapcast.call(config["host"], config["port"], method, params)
+        return snapcast.call(config["host"], config["http_port"], method, params)
     except snapcast.SnapcastError as exc:
         raise HTTPException(status_code=502, detail=f"Snapserver: {exc}") from exc
 
@@ -94,7 +94,7 @@ def get_status(user: CurrentUser, db: DbSession = Depends(get_db)) -> dict:
     if not config["enabled"]:
         return {"connected": False, "error": None, "groups": [], "streams": []}
     try:
-        raw = snapcast.call(config["host"], config["port"], "Server.GetStatus")
+        raw = snapcast.call(config["host"], config["http_port"], "Server.GetStatus")
     except snapcast.SnapcastError as exc:
         return {"connected": False, "error": str(exc), "groups": [], "streams": []}
     return {"connected": True, "error": None, **snapcast.normalise_status(raw)}

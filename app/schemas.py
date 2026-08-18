@@ -191,3 +191,24 @@ class AuthStatus(BaseModel):
     email: str
     groups: list[str]
     role: str
+    #: Nomme dans la configuration : son role ne se revoque pas a l'ecran.
+    is_super_admin: bool
+
+
+class UserOut(BaseModel):
+    """Une personne deja connectee, telle que la page Administration l'affiche."""
+
+    id: int
+    subject: str
+    name: str
+    email: str
+    is_admin: bool
+    #: Nomme dans la configuration : sa bascule est desactivee a l'ecran.
+    is_super_admin: bool
+    last_seen_at: UtcDatetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdminUpdate(BaseModel):
+    is_admin: bool

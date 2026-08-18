@@ -60,14 +60,27 @@ class Settings(BaseSettings):
     # d'ou oidc_groups_claim ci-dessous.
     oidc_scopes: str = "openid profile email groups"
     oidc_groups_claim: str = "groups"
-    # Groupe qui donne le role admin. Vide = personne n'est distingue.
-    oidc_admin_group: str = ""
     # Autorite propre au fournisseur, si son certificat n'est pas signe par la
     # meme que le reste. Vide = tls_ca_file, puis magasin systeme.
     oidc_ca_file: str = ""
     # Duree de la session applicative, independante de celle du jeton : on ne
     # conserve ni access token ni refresh token, seulement l'identite validee.
     session_max_age_s: int = 8 * 3600
+    # --- Administrateurs --------------------------------------------------
+    # Comptes toujours administrateurs, quoi qu'il arrive : c'est par eux que
+    # l'on entre la premiere fois, et ils ne peuvent pas etre retrogrades
+    # depuis l'interface. Tout le reste se gere ensuite a l'ecran.
+    #
+    # Liste separee par des virgules. Chaque entree est comparee au `sub` ET a
+    # l'adresse de courriel du jeton (comparaison insensible a la casse pour
+    # le courriel) : le `sub` d'un fournisseur est opaque et penible a
+    # recopier, le courriel se configure a la main.
+    #
+    # Le nom affiche n'est deliberement PAS compare : chez beaucoup de
+    # fournisseurs, chacun peut le modifier lui-meme — il suffirait de se
+    # renommer pour devenir administrateur.
+    super_admins: str = ""
+
     # Cle de signature du cookie de session. Obligatoire des que OIDC est
     # active : une valeur connue laisserait forger une session.
     session_secret: str = ""

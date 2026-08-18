@@ -197,6 +197,36 @@ class QueueItem(Base):
     track: Mapped[Track] = relationship()
 
 
+class User(Base):
+    """Une personne qui s'est deja connectee.
+
+    La table n'existe QUE pour porter `is_admin` : tout le reste de l'identite
+    vient du jeton a chaque requete, le fournisseur restant la source de
+    verite pour le nom, le courriel et les groupes. Les colonnes `name` et
+    `email` n'en sont qu'une copie, rafraichie a chaque connexion, pour que la
+    page Administration puisse afficher une liste lisible sans interroger le
+    fournisseur — ce qu'aucune API OIDC standard ne permettrait de toute facon.
+
+    Consequence assumee : on ne peut promouvoir que quelqu'un qui s'est deja
+    connecte au moins une fois.
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Identifiant du fournisseur : stable et unique, meme si la personne change
+    # de nom ou d'adresse. C'est lui qui fait l'identite, jamais le courriel.
+    subject: Mapped[str] = mapped_column(String(255), unique=True)
+    name: Mapped[str] = mapped_column(String(120))
+    email: Mapped[str] = mapped_column(String(255), default="")
+    # Promotion accordee depuis la page Administration. Les super-admins de la
+    # configuration sont admin sans etre marques ici : leur role ne se
+    # revoque pas depuis l'interface.
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class ScanRun(Base):
     __tablename__ = "scan_runs"
 

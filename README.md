@@ -341,7 +341,7 @@ branchent donc de la meme facon.**
 | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | Le client declare chez le fournisseur |
 | `OIDC_SCOPES` | `openid` obligatoire ; `groups` pour recevoir les groupes |
 | `OIDC_GROUPS_CLAIM` | Revendication portant les groupes (`groups` chez Authentik) |
-| `OIDC_ADMIN_GROUP` | Groupe donnant le role admin. Vide = personne |
+| `SUPER_ADMINS` | Comptes toujours administrateurs (`sub` ou courriel, separes par des virgules) |
 | `OIDC_CA_FILE` | Surcharge de `TLS_CA_FILE` pour le seul fournisseur |
 | `SESSION_SECRET` | **Obligatoire** si OIDC est actif. `openssl rand -hex 32` |
 | `PUBLIC_BASE_URL` | Sert a construire l'URI de redirection |
@@ -367,14 +367,46 @@ qui l'a signe.
 
 ### Roles
 
-Le role est calcule a chaque requete depuis les groupes du jeton : le
-fournisseur reste la source de verite, il n'y a pas de table d'utilisateurs a
-tenir a jour. **Aucune route n'est encore restreinte** — les roles sont lus et
-affiches, leur application viendra.
+Deux sources, et deux seulement :
 
-Sans `OIDC_ADMIN_GROUP`, personne n'est administrateur : un defaut qui
-donnerait ce role sur une configuration incomplete serait le mauvais sens de
-securite.
+- **`SUPER_ADMINS`**, liste de comptes toujours administrateurs. C'est par eux
+  que l'on entre la premiere fois, et leur role **ne se retire pas depuis
+  l'interface** : meme si la base est perdue ou si quelqu'un se retrograde, ces
+  comptes-la font toujours entrer ;
+- la **promotion accordee a l'ecran**, conservee dans la table `users`. Un
+  administrateur peut nommer d'autres administrateurs.
+
+Chaque entree de `SUPER_ADMINS` est comparee au `sub` **et** au courriel du
+jeton. Le nom affiche n'est deliberement pas compare : chez beaucoup de
+fournisseurs chacun peut modifier le sien, il suffirait de se renommer pour
+devenir administrateur.
+
+Les groupes du jeton sont lus et affiches, mais **ne donnent aucun role** : la
+gestion se fait dans l'application, pas chez le fournisseur.
+
+`/api/admin/*` repond **403** a qui n'est pas administrateur. Sans OIDC, tout
+le monde l'est : sans fournisseur d'identite, distinguer les roles n'aurait
+aucun fondement, et restreindre rendrait l'application inadministrable.
+
+#### Ce qui ne peut pas arriver
+
+- **se retirer soi-meme le role** : refuse, ce serait fermer la porte derriere
+  soi sans retour possible a l'ecran ;
+- **retrograder un compte de `SUPER_ADMINS`** : refuse, son role vient de la
+  configuration et le changer ici donnerait l'illusion d'avoir agi ;
+- **retirer le dernier administrateur** quand aucun super-administrateur
+  connu n'existe : refuse.
+
+#### La table `users`
+
+Elle n'existe que pour porter `is_admin`. Tout le reste de l'identite vient du
+jeton a chaque requete, le fournisseur restant la source de verite ; `name` et
+`email` n'en sont qu'une copie rafraichie a chaque connexion, pour que la page
+Administration affiche une liste lisible.
+
+Consequence assumee : **on ne peut promouvoir que quelqu'un qui s'est deja
+connecte au moins une fois.** Aucune API OIDC standard ne permet de lister les
+comptes d'un fournisseur.
 
 ### Verification
 

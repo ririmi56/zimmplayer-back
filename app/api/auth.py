@@ -8,10 +8,13 @@ JSON que la WebSocket du relais audio.
 import hmac
 import logging
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
-from app.auth import SESSION_IDENTITY, CurrentUser
+from sqlalchemy.orm import Session as DbSession
+
+from app.auth import SESSION_IDENTITY, CurrentUser, remember
+from app.db import get_db
 from app.config import get_settings
 from app.schemas import AuthStatus
 from app.services import oidc
@@ -48,7 +51,8 @@ def login(request: Request) -> RedirectResponse:
 
 @router.get("/callback")
 def callback(request: Request, code: str | None = None, state: str | None = None,
-             error: str | None = None, error_description: str | None = None) -> RedirectResponse:
+             error: str | None = None, error_description: str | None = None,
+             db: DbSession = Depends(get_db)) -> RedirectResponse:
     """Retour du fournisseur. Redirige toujours vers l'application, pas de JSON.
 
     C'est le navigateur qui arrive ici, pas le code de l'interface : une erreur
@@ -81,12 +85,15 @@ def callback(request: Request, code: str | None = None, state: str | None = None
     except oidc.OidcError as exc:
         return echoue(str(exc))
 
-    request.session[SESSION_IDENTITY] = {
+    enregistree = {
         "subject": identity.subject,
         "name": identity.name,
         "email": identity.email,
         "groups": identity.groups,
     }
+    request.session[SESSION_IDENTITY] = enregistree
+    # Sans cette trace, la page Administration n'aurait personne a proposer.
+    remember(db, enregistree)
     return RedirectResponse(home, status_code=303)
 
 
@@ -107,6 +114,7 @@ def me(request: Request, user: CurrentUser) -> AuthStatus:
         email=session.get("email", ""),
         groups=session.get("groups", []),
         role=user.role,
+        is_super_admin=user.is_super_admin,
     )
 
 

@@ -22,11 +22,42 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+def _avertir_si_aucun_administrateur(db) -> None:
+    """Signale une installation que personne ne peut administrer.
+
+    Le cas se produit des qu'OIDC est actif sans SUPER_ADMINS et sans aucune
+    promotion en base : la page Administration devient alors inaccessible a
+    tout le monde, et il faut passer par la base pour reprendre la main. On
+    n'empeche pas le demarrage — refuser de demarrer sur une edition de
+    configuration serait pire — mais on le dit fort.
+    """
+    settings = get_settings()
+    if not settings.oidc_enabled:
+        return
+    from sqlalchemy import select
+
+    from app.auth import is_super_admin
+    from app.models import User
+
+    if db.scalar(select(User.id).where(User.is_admin).limit(1)):
+        return
+    connus = db.execute(select(User.subject, User.email)).all()
+    if any(is_super_admin(subject, email) for subject, email in connus):
+        return
+    logger.error(
+        "Aucun administrateur : SUPER_ADMINS ne designe personne de connu et "
+        "aucun compte n'est promu en base. La page Administration sera "
+        "inaccessible a tous. Renseigner SUPER_ADMINS (sub ou courriel) et "
+        "redemarrer."
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Chaque session doit retrouver son flux Snapcast au redemarrage, sinon sa
     configuration pointerait vers un port que plus personne n'ecoute."""
     with SessionLocal() as db:
+        _avertir_si_aucun_administrateur(db)
         try:
             snapoutput.restore(db)
         except Exception:

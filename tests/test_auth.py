@@ -1,10 +1,16 @@
 """Les deux modes d'identite, et la frontiere entre eux."""
 
-import pytest
 from fastapi.testclient import TestClient
 
-from app.auth import user_from_session
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+import app.models  # noqa: F401  (enregistre les tables)
+from app.auth import is_super_admin, user_from_session
 from app.config import get_settings
+from app.db import Base, get_db
+from app.models import User as UserRow
 
 
 @pytest.fixture
@@ -35,23 +41,40 @@ def session(**identite):
     return {"identity": base}
 
 
-class TestRoleDepuisLesGroupes:
-    def test_le_groupe_configure_donne_admin(self, configure):
-        configure(oidc_enabled="true", oidc_admin_group="zimmplayer-admins",
-                  session_secret="x")
-        user = user_from_session(session(groups=["ecoute", "zimmplayer-admins"]))
-        assert user.role == "admin" and user.is_admin
+class TestSuperAdministrateurs:
+    """Les comptes nommes dans la configuration, par ou l'on entre la premiere
+    fois et qui ne peuvent pas etre retrogrades depuis l'interface."""
 
-    def test_les_autres_groupes_ne_donnent_rien(self, configure):
-        configure(oidc_enabled="true", oidc_admin_group="zimmplayer-admins",
-                  session_secret="x")
-        assert user_from_session(session(groups=["ecoute"])).role == "user"
+    def test_reconnu_par_son_sujet(self, configure):
+        configure(super_admins="u-1")
+        assert is_super_admin("u-1", "")
 
-    def test_sans_groupe_configure_personne_n_est_admin(self, configure):
-        """Un defaut qui donnerait admin sur une configuration incomplete
-        serait le mauvais sens de securite."""
-        configure(oidc_enabled="true", oidc_admin_group="", session_secret="x")
-        assert user_from_session(session(groups=["admins", "root"])).role == "user"
+    def test_reconnu_par_son_courriel(self, configure):
+        """Le `sub` d'un fournisseur est opaque : le courriel se configure a
+        la main, c'est ce qu'on ecrira en pratique."""
+        configure(super_admins="adrien@interne")
+        assert is_super_admin("Cg0wLTM4NS0yODA4OS0w", "Adrien@Interne")
+
+    def test_le_nom_affiche_n_est_jamais_compare(self, configure):
+        """Chez beaucoup de fournisseurs chacun modifie le sien : il suffirait
+        de se renommer pour devenir administrateur."""
+        configure(super_admins="Adrien")
+        user = user_from_session(session(name="Adrien", subject="u-9", email="x@y"))
+        assert user.role == "user"
+
+    def test_liste_et_espaces(self, configure):
+        configure(super_admins=" a@x , b@y ")
+        assert is_super_admin("", "b@y")
+        assert not is_super_admin("", "c@z")
+
+    def test_vide_ne_promeut_personne(self, configure):
+        configure(super_admins="")
+        assert not is_super_admin("u-1", "a@x")
+
+    def test_role_admin_et_indicateur(self, configure):
+        configure(oidc_enabled="true", super_admins="a@interne", session_secret="x")
+        user = user_from_session(session(email="a@interne"))
+        assert user.role == "admin" and user.is_super_admin
 
     def test_session_vide(self, configure):
         configure(oidc_enabled="true", session_secret="x")

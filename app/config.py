@@ -26,6 +26,20 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["http://localhost:5173"]
 
+    # --- TLS sortant ------------------------------------------------------
+    # Autorite de certification a laquelle faire confiance pour TOUTES les
+    # connexions sortantes de l'API : stockage S3 (boto3 et ffmpeg) et
+    # snapserver. Vide = magasin de certificats du systeme.
+    #
+    # Sur un reseau airgap les certificats sont signes par une autorite maison,
+    # absente de tout magasin livre avec les images : sans ce reglage, chaque
+    # connexion chiffree echoue a la verification.
+    #
+    # Attention : ce fichier REMPLACE le magasin systeme, il ne s'y ajoute pas.
+    # S'il faut joindre a la fois des serveurs internes et des serveurs a
+    # certificat public, y concatener les deux jeux d'autorites.
+    tls_ca_file: str = ""
+
     # --- Snapcast ---------------------------------------------------------
     # Valeurs par defaut seulement : l'ecran de configuration les surcharge et
     # les persiste en base (voir services/appsettings.py).
@@ -45,8 +59,8 @@ class Settings(BaseSettings):
     # reverse proxy TLS devant lui, et `snapcast_http_port` pointant sur ce
     # proxy. Vaut pour le controle comme pour l'audio, qui partagent le port.
     snapcast_tls: bool = False
-    # Vide = magasin de certificats du systeme. En airgap, pointer ici le
-    # certificat de l'autorite maison.
+    # Autorite propre a snapserver, quand son proxy TLS n'est pas signe par
+    # la meme que le reste. Vide = `tls_ca_file`, puis magasin systeme.
     snapcast_tls_ca_file: str = ""
     # Nom verifie contre le certificat (et envoye en SNI). Vide = snapcast_host,
     # a renseigner si l'on joint le serveur par IP.

@@ -180,6 +180,33 @@ cela évite un thread lecteur, une machine à états de reconnexion et un cache 
 invalider. Snapserver entrelaçant ses notifications avec les réponses, chaque
 réponse est retrouvée par son `id`.
 
+### Autorité de certification interne
+
+Sur un réseau airgap, les certificats sont signés par une autorité maison
+qu'aucun magasin livré avec les images ne connaît. **`TLS_CA_FILE`** la déclare
+une fois pour toutes les connexions chiffrées sortantes de l'API :
+
+| Client | Ce qu'il joint | Comment la variable est appliquée |
+|---|---|---|
+| boto3 | Endpoint S3 (listage, téléchargement, signature) | `verify=` |
+| ffmpeg | URL présignée du morceau, en lecture Snapcast | `-tls_verify 1 -ca_file` |
+| websockets | Le proxy TLS devant snapserver | `ssl.create_default_context(cafile=)` |
+
+Le chemin est lu **dans le conteneur de l'API** : monter le fichier, par
+exemple `- /etc/pki/interne.pem:/etc/ssl/interne.pem:ro`.
+
+Deux pièges :
+
+- ce fichier **remplace** le magasin système, il ne s'y ajoute pas. Pour
+  joindre à la fois des serveurs internes et des serveurs à certificat public,
+  y concaténer les deux jeux d'autorités ;
+- **ffmpeg ne vérifie rien par défaut** (`tls_verify` vaut `0`). Un endpoint S3
+  en `https` était donc accepté quel que soit son certificat, alors même que
+  l'URL présignée qui y transite porte les droits de lecture du bucket. La
+  vérification est désormais activée dès que l'URL est chiffrée — un stockage
+  `https` à certificat auto-signé et sans `TLS_CA_FILE` cessera de fonctionner,
+  ce qui est le comportement voulu.
+
 ### TLS vers snapserver
 
 Snapserver ne chiffre rien lui-même : `SNAPCAST_TLS=true` suppose un **reverse
@@ -189,13 +216,13 @@ deux canaux passent alors en `wss://`.
 | Variable | Rôle |
 |---|---|
 | `SNAPCAST_TLS` | Passe le contrôle et l'audio en `wss://` |
-| `SNAPCAST_TLS_CA_FILE` | Vide = magasin système. En airgap, le certificat de **votre** autorité |
+| `SNAPCAST_TLS_CA_FILE` | Surcharge de `TLS_CA_FILE`, si le proxy de snapserver est signé par une autre autorité |
 | `SNAPCAST_TLS_SERVER_NAME` | Nom vérifié contre le certificat, et SNI. Vide = `SNAPCAST_HOST` |
 
 Le certificat est toujours vérifié — il n'y a volontairement pas d'option pour
 désactiver ce contrôle : un contrôle non authentifié laisserait piloter les
 enceintes par n'importe quel serveur répondant sur le port. En airgap, la
-réponse est de renseigner `SNAPCAST_TLS_CA_FILE`. Renseigner
+réponse est de renseigner `TLS_CA_FILE` (voir ci-dessous). Renseigner
 `SNAPCAST_TLS_SERVER_NAME` quand on joint le serveur par IP mais que le
 certificat porte un nom.
 

@@ -179,3 +179,15 @@ class MoveItem(BaseModel):
 
 class SeekRequest(BaseModel):
     position_s: float = Field(ge=0)
+
+
+class AuthStatus(BaseModel):
+    """Ce que l'interface doit savoir pour afficher, ou non, une connexion."""
+
+    oidc_enabled: bool
+    authenticated: bool
+    subject: str
+    name: str
+    email: str
+    groups: list[str]
+    role: str

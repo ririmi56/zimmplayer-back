@@ -3,9 +3,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy import text
 
-from app.api import admin, catalog, edit, sessions, snapcast, stream
+from app.api import admin, auth, catalog, edit, sessions, snapcast, stream
 from app.config import get_settings
 from app.db import SessionLocal, engine
 from app.services import snapoutput
@@ -42,6 +43,32 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Session applicative : cookie signe, jamais lisible ni forgeable par le
+# navigateur. Monte meme sans OIDC, pour que `request.session` existe partout
+# et que le mode ne se lise qu'a un seul endroit (app/auth.py).
+#
+# Sans OIDC la session ne contient rien : la cle de repli ne protege donc
+# aucun secret. Des qu'OIDC est active, SESSION_SECRET est exige au demarrage
+# (voir ci-dessous) — une cle connue laisserait forger l'identite de n'importe
+# qui, ce qui reviendrait a n'avoir pas d'authentification du tout.
+if settings.oidc_enabled and not settings.session_secret:
+    raise RuntimeError(
+        "SESSION_SECRET est obligatoire quand OIDC_ENABLED vaut true : "
+        "sans cle propre, le cookie de session pourrait etre forge."
+    )
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.session_secret or "sans-oidc-la-session-reste-vide",
+    session_cookie="zimmplayer_session",
+    max_age=settings.session_max_age_s,
+    same_site="lax",
+    # Le flux OIDC revient par une redirection du fournisseur : `strict`
+    # empecherait le cookie d'accompagner ce retour, et la connexion
+    # echouerait sans message comprehensible.
+    https_only=settings.public_base_url.startswith("https://"),
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -51,6 +78,7 @@ app.add_middleware(
 )
 
 
+app.include_router(auth.router)
 app.include_router(catalog.router)
 app.include_router(stream.router)
 app.include_router(edit.router)

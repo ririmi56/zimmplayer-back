@@ -299,10 +299,90 @@ chaud, il doit donc être présent même s'il ne sert pas.
 
 ### Identité
 
-Sans authentification, l'identité se résume à un pseudo choisi côté client,
-envoyé en en-tête `X-User-Name`. C'est ce pseudo qui s'affiche à côté des
-titres ajoutés. À l'arrivée d'OIDC, seul `app/auth.py` change — toutes les
-routes injectent déjà `CurrentUser`.
+C'est le pseudo, ou l'identité OIDC, qui s'affiche à côté des titres ajoutés à
+une file partagée — voir [Identité et OIDC](#identite-et-oidc). Le nom du
+snapclient qu'est le navigateur vient de la même source, jamais d'un
+renommage indépendant.
+
+## Identite et OIDC
+
+Deux modes, choisis par `OIDC_ENABLED`.
+
+**Sans OIDC** (defaut), l'identite se resume au pseudo saisi dans l'ecran
+Configuration et transmis dans l'en-tete `X-User-Name`. Rien n'est verifie :
+ce mode convient au developpement et a un poste isole.
+
+**Avec OIDC**, l'identite vient d'un jeton valide par le fournisseur.
+La boite de saisie du pseudo disparait, et **`X-User-Name` cesse d'etre lue** —
+la laisser active offrirait un chemin trivial pour se faire passer pour
+quelqu'un d'autre, ce qui viderait l'authentification de son sens.
+
+### Ce qui est mis en oeuvre
+
+Code d'autorisation avec **PKCE**, l'API jouant le **client confidentiel**.
+Le navigateur ne recoit jamais de jeton, seulement un cookie de session signe.
+Ce n'est pas un detail d'implementation : le relais audio est une **WebSocket**,
+qui ne peut pas porter d'en-tete `Authorization` depuis le navigateur — mais
+qui porte les cookies.
+
+Aucun jeton n'est conserve apres la connexion, seulement l'identite validee.
+Il n'y a donc ni rafraichissement ni jeton au repos ; la session applicative a
+sa propre duree (`SESSION_MAX_AGE_S`), au terme de laquelle il faut se
+reconnecter.
+
+Seule l'URL de l'emetteur est configuree : les points d'entree sont lus dans
+son document de decouverte. **Authentik, Keycloak, Dex, Zitadel ou Entra se
+branchent donc de la meme facon.**
+
+| Variable | Role |
+|---|---|
+| `OIDC_ENABLED` | Bascule entre les deux modes |
+| `OIDC_ISSUER` | URL de l'emetteur, **sans** `/.well-known` |
+| `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | Le client declare chez le fournisseur |
+| `OIDC_SCOPES` | `openid` obligatoire ; `groups` pour recevoir les groupes |
+| `OIDC_GROUPS_CLAIM` | Revendication portant les groupes (`groups` chez Authentik) |
+| `OIDC_ADMIN_GROUP` | Groupe donnant le role admin. Vide = personne |
+| `OIDC_CA_FILE` | Surcharge de `TLS_CA_FILE` pour le seul fournisseur |
+| `SESSION_SECRET` | **Obligatoire** si OIDC est actif. `openssl rand -hex 32` |
+| `PUBLIC_BASE_URL` | Sert a construire l'URI de redirection |
+
+**URI de redirection a declarer chez le fournisseur** :
+`<PUBLIC_BASE_URL>/api/auth/callback`, au caractere pres.
+
+### Certificats
+
+Le fournisseur est joint avec le magasin de `TLS_CA_FILE` (voir plus haut), ou
+celui d'`OIDC_CA_FILE` s'il est signe par une autre autorite. La verification
+n'est jamais desactivable : un fournisseur d'identite usurpe permettrait de
+forger n'importe quelle connexion.
+
+Un certificat refuse le dit clairement, en nommant le reglage a poser :
+
+```
+decouverte OIDC impossible sur https://idp.interne/.well-known/openid-configuration :
+le certificat du fournisseur est refuse (unable to get local issuer certificate).
+Sur un reseau airgap, renseigner OIDC_CA_FILE ou TLS_CA_FILE avec l'autorite
+qui l'a signe.
+```
+
+### Roles
+
+Le role est calcule a chaque requete depuis les groupes du jeton : le
+fournisseur reste la source de verite, il n'y a pas de table d'utilisateurs a
+tenir a jour. **Aucune route n'est encore restreinte** — les roles sont lus et
+affiches, leur application viendra.
+
+Sans `OIDC_ADMIN_GROUP`, personne n'est administrateur : un defaut qui
+donnerait ce role sur une configuration incomplete serait le mauvais sens de
+securite.
+
+### Verification
+
+`scripts/check_oidc.sh` (depot d'orchestration) rejoue le flux complet contre
+**Dex**, servi en TLS avec une autorite maison. Dex n'est pas Authentik, et
+c'est le but : si le flux passe la, c'est qu'il ne depend d'aucune
+particularite du fournisseur. Le script verifie aussi qu'**un certificat non
+approuve fait echouer la connexion**.
 
 ## Genre et paroles
 

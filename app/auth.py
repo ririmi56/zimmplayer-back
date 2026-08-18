@@ -106,6 +106,22 @@ def user_from_session(session: dict, db: DbSession | None = None) -> User | None
     )
 
 
+def user_row(db: DbSession, user: User) -> UserRow:
+    """Ligne `users` correspondant a l'utilisateur courant, creee au besoin.
+
+    Sans OIDC, personne ne passe par la connexion : la ligne n'existerait
+    jamais, et les playlists n'auraient pas de proprietaire a designer. On la
+    cree donc a la demande, et les deux modes se comportent pareil a partir de
+    la — le pseudo tient lieu de sujet.
+    """
+    row = db.scalar(select(UserRow).where(UserRow.subject == user.subject))
+    if row is None:
+        row = UserRow(subject=user.subject, name=user.name, email=user.email)
+        db.add(row)
+        db.commit()
+    return row
+
+
 def remember(db: DbSession, identity: dict) -> UserRow:
     """Enregistre ou rafraichit la personne qui vient de se connecter.
 

@@ -212,3 +212,56 @@ class UserOut(BaseModel):
 
 class AdminUpdate(BaseModel):
     is_admin: bool
+
+
+class PersonOut(BaseModel):
+    """Une personne connue, telle qu'un selecteur de partage l'affiche."""
+
+    id: int
+    name: str
+    email: str
+
+
+class PlaylistCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+class PlaylistTracksAdd(BaseModel):
+    """Des titres nommes un par un, ou tout un album."""
+
+    track_ids: list[int] | None = None
+    album_id: int | None = None
+
+
+class ShareUpdate(BaseModel):
+    #: Faux = lecture seule ; vrai = peut aussi ajouter et retirer des titres.
+    can_edit: bool = False
+
+
+class PlaylistShareOut(BaseModel):
+    user_id: int
+    name: str
+    can_edit: bool
+
+
+class PlaylistItemOut(BaseModel):
+    id: int
+    track: TrackOut
+    #: Qui a ajoute ce titre, sur une playlist partagee en ecriture.
+    added_by: str | None
+
+
+class PlaylistOut(BaseModel):
+    id: int
+    name: str
+    owner_name: str
+    is_owner: bool
+    can_edit: bool
+    track_count: int
+    updated_at: UtcDatetime
+
+
+class PlaylistDetail(PlaylistOut):
+    items: list[PlaylistItemOut]
+    #: Vide pour qui n'est pas proprietaire : lui seul gere les partages.
+    shares: list[PlaylistShareOut]

@@ -13,10 +13,13 @@ from fastapi.responses import RedirectResponse
 
 from sqlalchemy.orm import Session as DbSession
 
+from sqlalchemy import select
+
 from app.auth import SESSION_IDENTITY, CurrentUser, remember
+from app.models import User as UserRow
 from app.db import get_db
 from app.config import get_settings
-from app.schemas import AuthStatus
+from app.schemas import AuthStatus, PersonOut
 from app.services import oidc
 
 logger = logging.getLogger(__name__)
@@ -139,3 +142,27 @@ def logout(request: Request) -> dict[str, str | None]:
 
 def _egal(a: str, b: str) -> bool:
     return hmac.compare_digest(a, b)
+
+
+# --- Annuaire --------------------------------------------------------------
+
+#: Routeur separe : ce n'est pas de l'authentification, mais la liste des
+#: personnes avec qui on peut partager. Il vit ici parce que c'est la que
+#: l'identite est definie.
+directory = APIRouter(prefix="/api", tags=["identite"])
+
+
+@directory.get("/users", response_model=list[PersonOut])
+def list_people(user: CurrentUser, db: DbSession = Depends(get_db)) -> list[PersonOut]:
+    """Les personnes connues, pour choisir avec qui partager une playlist.
+
+    Accessible a tout le monde et non aux seuls administrateurs : sans elle,
+    personne ne pourrait partager. On n'expose que le nom et le courriel, soit
+    ce qu'un carnet d'adresses montrerait — ni les groupes, ni le role, ni la
+    date de derniere venue.
+
+    On ne connait que les personnes deja passees : aucune API OIDC standard ne
+    permet de lister les comptes d'un fournisseur.
+    """
+    rows = db.scalars(select(UserRow).order_by(UserRow.name))
+    return [PersonOut(id=row.id, name=row.name, email=row.email) for row in rows]

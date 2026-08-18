@@ -227,6 +227,82 @@ class User(Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class Playlist(Base):
+    """Une selection de titres, personnelle puis partageable.
+
+    Distincte de la file d'une session : la file est ce qui joue maintenant et
+    se vide en avancant, une playlist se garde. Elles ne se rejoignent qu'au
+    moment ou l'on envoie l'une dans l'autre.
+    """
+
+    __tablename__ = "playlists"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    owner: Mapped["User"] = relationship()
+    items: Mapped[list["PlaylistTrack"]] = relationship(
+        back_populates="playlist",
+        cascade="all, delete-orphan",
+        order_by="PlaylistTrack.position",
+    )
+    shares: Mapped[list["PlaylistShare"]] = relationship(
+        back_populates="playlist", cascade="all, delete-orphan"
+    )
+
+
+class PlaylistTrack(Base):
+    """Un titre dans une playlist.
+
+    Le meme titre peut y figurer plusieurs fois — c'est parfois voulu, et
+    l'interdire compliquerait sans rendre service. D'ou une cle propre plutot
+    qu'un couple (playlist, piste) unique.
+    """
+
+    __tablename__ = "playlist_tracks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    playlist_id: Mapped[int] = mapped_column(
+        ForeignKey("playlists.id", ondelete="CASCADE"), index=True
+    )
+    track_id: Mapped[int] = mapped_column(ForeignKey("tracks.id", ondelete="CASCADE"))
+    position: Mapped[int] = mapped_column(Integer)
+    # Qui l'a ajoute : sur une playlist partagee en ecriture, c'est la seule
+    # facon de savoir d'ou vient un titre qu'on n'a pas mis soi-meme.
+    added_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    playlist: Mapped[Playlist] = relationship(back_populates="items")
+    track: Mapped["Track"] = relationship()
+    added_by: Mapped["User | None"] = relationship()
+
+
+class PlaylistShare(Base):
+    """Partage d'une playlist avec une personne, en lecture ou en ecriture."""
+
+    __tablename__ = "playlist_shares"
+    __table_args__ = (
+        Index("uq_playlist_shares", "playlist_id", "user_id", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    playlist_id: Mapped[int] = mapped_column(
+        ForeignKey("playlists.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    #: Faux = lecture seule ; vrai = peut aussi ajouter et retirer des titres.
+    can_edit: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    playlist: Mapped[Playlist] = relationship(back_populates="shares")
+    user: Mapped["User"] = relationship()
+
+
 class ScanRun(Base):
     __tablename__ = "scan_runs"
 

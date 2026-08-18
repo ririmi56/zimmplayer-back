@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy import text
 
-from app.api import admin, auth, catalog, edit, sessions, snapcast, stream
+from app.api import admin, auth, catalog, edit, playlists, sessions, snapcast, stream
 from app.config import get_settings
 from app.db import SessionLocal, engine
 from app.services import snapoutput
@@ -110,7 +110,9 @@ app.add_middleware(
 
 
 app.include_router(auth.router)
+app.include_router(auth.directory)
 app.include_router(catalog.router)
+app.include_router(playlists.router)
 app.include_router(stream.router)
 app.include_router(edit.router)
 app.include_router(sessions.router)

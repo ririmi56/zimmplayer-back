@@ -416,6 +416,54 @@ c'est le but : si le flux passe la, c'est qu'il ne depend d'aucune
 particularite du fournisseur. Le script verifie aussi qu'**un certificat non
 approuve fait echouer la connexion**.
 
+## Playlists
+
+Une selection de titres qu'on garde, par opposition a la file d'une session
+qui est ce qui joue maintenant et se vide en avancant. Les deux ne se
+rejoignent qu'au moment ou l'on envoie l'une dans l'autre.
+
+### Droits
+
+Une seule fonction en decide (`_acces` dans `api/playlists.py`), et toutes les
+routes s'y referent : un droit recalcule route par route finit toujours par
+diverger quelque part, et c'est la divergence qui ouvre le trou.
+
+| | Voir | Ajouter, retirer | Renommer, supprimer, partager |
+|---|---|---|---|
+| Proprietaire | oui | oui | oui |
+| Partage en ecriture | oui | oui | **non** |
+| Partage en lecture | oui | non | non |
+| Les autres | non | non | non |
+
+Partager en ecriture sert a composer a plusieurs, pas a se transmettre la
+playlist — d'ou le « non » de la troisieme colonne.
+
+Une playlist qu'on n'a pas le droit de voir repond **404**, jamais 403 : un
+403 confirmerait son existence a qui n'a rien a y faire.
+
+Seul le proprietaire recoit la liste des partages. La donner aux autres
+reviendrait a diffuser qui ecoute avec qui, sans que cela leur serve.
+
+### Ce qui merite d'etre su
+
+- **le meme titre peut y figurer plusieurs fois** : c'est parfois voulu, et
+  l'interdire compliquerait sans rendre service. D'ou une cle propre sur
+  `playlist_tracks` plutot qu'un couple (playlist, piste) unique ;
+- **un identifiant caduc ne fait pas echouer tout l'ajout** : les identifiants
+  viennent du client, on ne garde que ceux qui existent. Sinon la contrainte de
+  cle etrangere ferait perdre le lot entier pour un seul titre disparu ;
+- **`GET /api/users`** liste les personnes connues, pour choisir avec qui
+  partager. Accessible a tous et non aux seuls administrateurs — sans elle,
+  personne ne pourrait partager. On n'expose que le nom et le courriel, ce
+  qu'un carnet d'adresses montrerait ;
+- **on ne partage qu'avec quelqu'un deja passe** au moins une fois : aucune API
+  OIDC standard ne permet de lister les comptes d'un fournisseur. Sans OIDC,
+  la ligne `users` est creee a la demande, au premier appel fait au nom d'un
+  pseudo ;
+- **supprimer un compte emporte ses playlists**, mais pas les titres qu'il
+  avait mis dans celles des autres : `added_by_id` passe a NULL au lieu de
+  faire disparaitre la ligne.
+
 ## Genre et paroles
 
 Les deux sont lus dans les tags, jamais devinés — rien n'est récupérable en

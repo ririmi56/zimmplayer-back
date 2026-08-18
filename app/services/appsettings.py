@@ -6,7 +6,6 @@ from app.config import get_settings
 from app.models import AppSetting, utcnow
 
 SNAPCAST_HOST = "snapcast.host"
-SNAPCAST_PORT = "snapcast.port"
 SNAPCAST_HTTP_PORT = "snapcast.http_port"
 SNAPCAST_ENABLED = "snapcast.enabled"
 SNAPCAST_ADVERTISE_HOST = "snapcast.advertise_host"
@@ -30,7 +29,8 @@ def snapcast_config(db: DbSession) -> dict[str, object]:
     settings = get_settings()
     return {
         "host": get(db, SNAPCAST_HOST, settings.snapcast_host),
-        "port": int(get(db, SNAPCAST_PORT, str(settings.snapcast_port))),
+        # Port unique de snapserver : controle JSON-RPC et audio. L'ancienne
+        # cle `snapcast.port` (1705) peut subsister en base, elle n'est plus lue.
         "http_port": int(
             get(db, SNAPCAST_HTTP_PORT, str(settings.snapcast_http_port))
         ),

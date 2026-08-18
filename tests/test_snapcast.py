@@ -8,9 +8,10 @@ from datetime import timedelta
 
 import pytest
 
+from app.config import get_settings
 from app.models import Session, utcnow
 from app.services.queue import effective_position
-from app.services.snapcast import normalise_status, stream_uri
+from app.services.snapcast import normalise_status, stream_uri, ws_target
 from app.services.snapoutput import BYTES_PER_SECOND, stream_name
 
 
@@ -35,6 +36,44 @@ class TestStreamUri:
     )
     def test_nom_de_flux_utilisable_dans_une_uri(self, raw, expected):
         assert stream_name(raw) == expected
+
+
+class TestWsTarget:
+    """Le controle JSON-RPC et le relais audio doivent viser le meme serveur
+    avec le meme schema : un `ws://` code en dur d'un cote suffit a rendre le
+    mode TLS inutilisable, sans erreur parlante.
+    """
+
+    @pytest.fixture
+    def configure(self, monkeypatch):
+        def _configure(**env):
+            for key, value in env.items():
+                monkeypatch.setenv(key.upper(), value)
+            get_settings.cache_clear()
+
+        yield _configure
+        get_settings.cache_clear()
+
+    def test_sans_tls(self, configure):
+        configure(snapcast_tls="false")
+        assert ws_target("snap.local", 1780, "/jsonrpc") == (
+            "ws://snap.local:1780/jsonrpc",
+            {},
+        )
+
+    def test_avec_tls_le_controle_et_l_audio_suivent(self, configure):
+        configure(snapcast_tls="true", snapcast_tls_server_name="")
+        for path in ("/jsonrpc", "/stream"):
+            uri, options = ws_target("snap.local", 443, path)
+            assert uri == f"wss://snap.local:443{path}"
+            assert "ssl" in options
+            # Sans nom explicite, le certificat est verifie contre l'hote joint.
+            assert "server_hostname" not in options
+
+    def test_nom_verifie_distinct_de_l_adresse_jointe(self, configure):
+        configure(snapcast_tls="true", snapcast_tls_server_name="snap.maison")
+        _, options = ws_target("10.0.0.5", 443, "/jsonrpc")
+        assert options["server_hostname"] == "snap.maison"
 
 
 class TestNormaliseStatus:

@@ -31,8 +31,9 @@ class Settings(BaseSettings):
     # les persiste en base (voir services/appsettings.py).
     snapcast_enabled: bool = False
     snapcast_host: str = "localhost"
-    snapcast_port: int = 1705
-    # Port HTTP/WebSocket, par lequel le navigateur recoit l'audio.
+    # Port HTTP/WebSocket de snapserver : il porte a la fois le controle
+    # JSON-RPC (/jsonrpc) et l'audio (/stream). C'est le seul port de
+    # snapserver que l'API utilise ; le port de controle TCP 1705 ne sert plus.
     snapcast_http_port: int = 1780
     # Adresse a laquelle snapserver joint CETTE API pour venir lire le PCM.
     # Resolue en IP avant d'etre transmise : snapserver refuse un nom d'hote.
@@ -40,9 +41,9 @@ class Settings(BaseSettings):
     # Plage de ports ouverts par l'API, un par session en mode snapcast.
     snapcast_port_start: int = 4960
     snapcast_port_count: int = 20
-    # Le port de controle de snapserver n'est pas chiffre : activer ceci
-    # suppose un terminateur TLS (stunnel, nginx `stream`) devant lui, et
-    # `snapcast_port` pointant sur ce terminateur.
+    # Snapserver ne chiffre pas son serveur HTTP : activer ceci suppose un
+    # reverse proxy TLS devant lui, et `snapcast_http_port` pointant sur ce
+    # proxy. Vaut pour le controle comme pour l'audio, qui partagent le port.
     snapcast_tls: bool = False
     # Vide = magasin de certificats du systeme. En airgap, pointer ici le
     # certificat de l'autorite maison.

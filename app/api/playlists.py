@@ -19,6 +19,7 @@ from app.models import Album, Artist, Playlist, PlaylistShare, PlaylistTrack, Tr
 from app.models import User as UserRow
 from app.schemas import (
     PlaylistCreate,
+    PlaylistMove,
     PlaylistDetail,
     PlaylistOut,
     PlaylistTracksAdd,
@@ -273,6 +274,43 @@ def remove_track(
     if item is None:
         raise HTTPException(status_code=404, detail="Titre introuvable dans cette playlist")
     db.delete(item)
+    db.commit()
+    db.refresh(playlist)
+    return _sortie(playlist, moi, detail=True, db=db)
+
+
+@router.post("/{playlist_id}/tracks/{item_id}/move", response_model=PlaylistDetail)
+def move_track(
+    playlist_id: int,
+    item_id: int,
+    body: PlaylistMove,
+    user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> PlaylistDetail:
+    """Deplace un titre au rang demande.
+
+    Renumerote toute la playlist plutot que d'echanger deux positions : c'est
+    la seule facon de garantir des rangs contigus, y compris apres des retraits
+    qui en ont laisse des trous.
+
+    Reserve a qui peut ecrire : reordonner, c'est modifier la playlist.
+    """
+    moi = user_row(db, user)
+    playlist = _charger(db, playlist_id, moi, Acces.ECRITURE)
+
+    items = list(playlist.items)
+    item = next((i for i in items if i.id == item_id), None)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Titre introuvable dans cette playlist")
+
+    restants = [i for i in items if i.id != item.id]
+    # Le rang vient du client : on le borne plutot que de le refuser, un rang
+    # hors limites voulant simplement dire « au bout ».
+    cible = max(0, min(body.to_index, len(restants)))
+    restants.insert(cible, item)
+    for position, entree in enumerate(restants):
+        entree.position = position
+
     db.commit()
     db.refresh(playlist)
     return _sortie(playlist, moi, detail=True, db=db)

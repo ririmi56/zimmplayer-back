@@ -233,6 +233,11 @@ class PlaylistTracksAdd(BaseModel):
     album_id: int | None = None
 
 
+class PlaylistMove(BaseModel):
+    #: Rang visé dans la playlist, borné par l'API.
+    to_index: int = Field(ge=0)
+
+
 class ShareUpdate(BaseModel):
     #: Faux = lecture seule ; vrai = peut aussi ajouter et retirer des titres.
     can_edit: bool = False

@@ -143,6 +143,86 @@ class TestComposition:
         assert comme(client, "Adrien").get("/api/playlists").json() == []
 
 
+class TestReordonner:
+    def ranger(self, client, qui="Adrien"):
+        playlist = creer(client, qui)
+        detail = comme(client, qui).post(
+            f"/api/playlists/{playlist['id']}/tracks", json={"track_ids": [1, 2, 3]}
+        ).json()
+        return playlist["id"], detail
+
+    def test_descendre_un_titre(self, client):
+        pid, detail = self.ranger(client)
+        premier = detail["items"][0]["id"]
+        apres = comme(client, "Adrien").post(
+            f"/api/playlists/{pid}/tracks/{premier}/move", json={"to_index": 2}
+        ).json()
+        assert [i["track"]["title"] for i in apres["items"]] == ["Titre 1", "Titre 2", "Titre 0"]
+
+    def test_remonter_un_titre(self, client):
+        pid, detail = self.ranger(client)
+        dernier = detail["items"][2]["id"]
+        apres = comme(client, "Adrien").post(
+            f"/api/playlists/{pid}/tracks/{dernier}/move", json={"to_index": 0}
+        ).json()
+        assert [i["track"]["title"] for i in apres["items"]] == ["Titre 2", "Titre 0", "Titre 1"]
+
+    def test_l_ordre_survit_a_la_relecture(self, client):
+        """La position est persistee, pas seulement reflétée dans la reponse."""
+        pid, detail = self.ranger(client)
+        comme(client, "Adrien").post(
+            f"/api/playlists/{pid}/tracks/{detail['items'][0]['id']}/move", json={"to_index": 2}
+        )
+        relu = comme(client, "Adrien").get(f"/api/playlists/{pid}").json()
+        assert [i["track"]["title"] for i in relu["items"]] == ["Titre 1", "Titre 2", "Titre 0"]
+
+    def test_un_rang_hors_limites_place_au_bout(self, client):
+        """Le rang vient du client : on le borne plutot que de le refuser."""
+        pid, detail = self.ranger(client)
+        apres = comme(client, "Adrien").post(
+            f"/api/playlists/{pid}/tracks/{detail['items'][0]['id']}/move",
+            json={"to_index": 99},
+        ).json()
+        assert [i["track"]["title"] for i in apres["items"]] == ["Titre 1", "Titre 2", "Titre 0"]
+
+    def test_les_rangs_restent_contigus_apres_un_retrait(self, client):
+        """Un retrait laisse un trou dans les positions : sans renumerotation
+        complete, le deplacement suivant partirait de rangs incoherents."""
+        pid, detail = self.ranger(client)
+        comme(client, "Adrien").delete(f"/api/playlists/{pid}/tracks/{detail['items'][1]['id']}")
+        apres = comme(client, "Adrien").post(
+            f"/api/playlists/{pid}/tracks/{detail['items'][2]['id']}/move", json={"to_index": 0}
+        ).json()
+        assert [i["track"]["title"] for i in apres["items"]] == ["Titre 2", "Titre 0"]
+
+    def test_la_lecture_seule_ne_reordonne_pas(self, client):
+        pid, detail = self.ranger(client)
+        bea = id_de(client, "Bea")
+        comme(client, "Adrien").put(
+            f"/api/playlists/{pid}/shares/{bea}", json={"can_edit": False}
+        )
+        refus = comme(client, "Bea").post(
+            f"/api/playlists/{pid}/tracks/{detail['items'][0]['id']}/move", json={"to_index": 2}
+        )
+        assert refus.status_code == 403
+
+    def test_l_ecriture_reordonne(self, client):
+        pid, detail = self.ranger(client)
+        bea = id_de(client, "Bea")
+        comme(client, "Adrien").put(
+            f"/api/playlists/{pid}/shares/{bea}", json={"can_edit": True}
+        )
+        assert comme(client, "Bea").post(
+            f"/api/playlists/{pid}/tracks/{detail['items'][0]['id']}/move", json={"to_index": 1}
+        ).status_code == 200
+
+    def test_titre_inconnu(self, client):
+        pid, _ = self.ranger(client)
+        assert comme(client, "Adrien").post(
+            f"/api/playlists/{pid}/tracks/9999/move", json={"to_index": 0}
+        ).status_code == 404
+
+
 class TestPartage:
     def test_invisible_tant_qu_elle_n_est_pas_partagee(self, client):
         """Et 404, pas 403 : un 403 confirmerait son existence a qui n'a rien

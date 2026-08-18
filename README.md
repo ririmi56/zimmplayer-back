@@ -464,6 +464,67 @@ reviendrait a diffuser qui ecoute avec qui, sans que cela leur serve.
   avait mis dans celles des autres : `added_by_id` passe a NULL au lieu de
   faire disparaitre la ligne.
 
+## Statistiques
+
+Deux moities aux natures opposees, et c'est ce qu'il faut retenir.
+
+Les statistiques du **catalogue** se calculent sur l'existant : nombre de
+titres, d'albums, d'artistes, duree cumulee, repartition par format et par
+genre. Elles sont justes depuis toujours.
+
+Celles **par personne** n'ont aucun passe. Rien n'etait enregistre, et
+`queue_items` est efface au fur et a mesure : il n'y a rien a reconstituer.
+Elles repartent de zero le jour du deploiement.
+
+### Ce qui compte comme une ecoute
+
+La moitie du titre, ou quatre minutes, au premier des deux (regle de Last.fm).
+Parcourir un album en sautant de titre en titre ne gonfle donc pas les
+compteurs, et un morceau vraiment ecoute compte meme si l'on coupe avant la
+fin. Une duree inconnue retombe sur le plafond, faute de quoi elle offrirait un
+moyen de compter des la premiere seconde.
+
+### Qui est credite
+
+**Tous les presents d'une session**, pas seulement celui qui a ajoute le titre.
+On mesure ce que chacun a ecoute, pas ce qu'il a fait jouer aux autres.
+
+Consequence a connaitre : les secondes sont comptees **par personne**. Une
+heure de musique ecoutee a trois vaut trois heures d'ecoute cumulee. C'est
+voulu, et l'interface le dit.
+
+### D'ou viennent les mesures
+
+| Situation | Qui compte | Pourquoi |
+|---|---|---|
+| Session | Le serveur, dans `snapoutput` | Le son sort de la, c'est le seul endroit qui sache ce qui a ete joue |
+| Ecoute solo | Le navigateur, via `POST /api/stats/listens` | L'API ne sert qu'une redirection vers le stockage : elle ne voit rien passer |
+
+Les valeurs annoncees par le navigateur sont bornees par la duree du titre et
+revalidees contre le seuil. Cela n'empeche pas un client de mentir dans ces
+bornes : **ces compteurs ne sont pas une preuve**, ce sont des statistiques.
+
+### La presence, deduite
+
+Le serveur ne savait pas qui etait dans une session — l'appartenance ne vivait
+que dans le navigateur. Elle se deduit de l'interrogation periodique de
+`GET /api/sessions/{id}`, que seul un membre effectue en boucle. Approximation
+assumee : elle ne se trompe que sur quelqu'un qui garderait la page ouverte
+sans ecouter.
+
+### Sessions supprimees
+
+`listens.session_name` recopie le nom au moment de l'ecoute. Les sessions sont
+supprimees couramment ; sans cette copie, leur historique disparaitrait avec
+elles et la statistique par session ne servirait a rien.
+
+### Visibilite
+
+`GET /api/stats` est ouvert a tous : c'est l'etat du serveur.
+`GET /api/stats/users` est **reserve aux administrateurs** — c'est le seul
+endroit ou l'activite de quelqu'un est visible par un autre. La route est
+gardee, pas seulement l'onglet qui l'affiche.
+
 ## Genre et paroles
 
 Les deux sont lus dans les tags, jamais devinés — rien n'est récupérable en

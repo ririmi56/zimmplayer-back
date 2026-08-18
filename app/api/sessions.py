@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
-from app.auth import CurrentUser
+from app.auth import CurrentUser, user_row
 from app.db import get_db
 from app.models import Album, Artist, QueueItem, Session, Track
 from app.schemas import (
@@ -21,7 +21,7 @@ from app.schemas import (
     SessionOut,
     TrackOut,
 )
-from app.services import queue as queue_service, snapoutput
+from app.services import queue as queue_service, stats, snapoutput
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -158,7 +158,16 @@ def create_session(
 def get_session(
     session_id: int, user: CurrentUser, db: DbSession = Depends(get_db)
 ) -> SessionDetail:
-    return _detail(db, _get(db, session_id))
+    """Detail d'une session, et seul signal d'appartenance dont on dispose.
+
+    Le navigateur interroge cette route en boucle tant qu'il suit une session,
+    et seulement celle-la : c'est ce qui permet au serveur de savoir qui
+    ecoute, information qui ne vivait jusqu'ici que dans le navigateur. Voir
+    services/stats.marquer_present pour l'approximation que cela represente.
+    """
+    session = _get(db, session_id)
+    stats.marquer_present(db, session.id, user_row(db, user).id)
+    return _detail(db, session)
 
 
 @router.delete("/{session_id}", status_code=204)
@@ -195,6 +204,9 @@ def add_to_queue(
         raise HTTPException(status_code=400, detail="Aucune piste a ajouter")
 
     queue_service.append_tracks(db, session, track_ids, user.name)
+    # Trace a part : `queue_items` disparait des qu'on retire le titre ou vide
+    # la file, l'information serait perdue pour les statistiques.
+    stats.enregistrer_ajout(db, user_row(db, user).id, track_ids, session)
     db.commit()
     db.refresh(session)
     return _detail(db, session)

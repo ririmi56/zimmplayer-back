@@ -1,4 +1,5 @@
 import re
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import Select, func, select, text
@@ -62,6 +63,27 @@ _ARTIST_SELECT = (
 
 # Le genre d'un album est agrege depuis ses pistes plutot que duplique dans une
 # colonne : les tags portent le genre au niveau du fichier.
+
+# Tris proposes pour la liste des albums. Chaque cle porte son sens naturel :
+# on lit un catalogue de A a Z, mais on veut voir les derniers ajouts EN
+# PREMIER — un seul menu suffit donc, sans bouton croissant/decroissant.
+#
+# `Album.id` clot systematiquement la liste : sans depart unique, deux albums
+# ex aequo (meme genre, meme annee) peuvent changer de place d'une requete a
+# l'autre, et le defilement infini afficherait alors des doublons tout en
+# sautant d'autres albums.
+AlbumSort = Literal["artiste", "titre", "annee", "ajout", "genre"]
+
+_ALBUM_ORDERS: dict[str, list] = {
+    "artiste": [Artist.name, Album.year.is_(None), Album.year],
+    "titre": [Album.title],
+    # Sans annee en dernier : un album non date n'a rien a faire en tete.
+    "annee": [Album.year.is_(None), Album.year.desc()],
+    "ajout": [Album.created_at.desc()],
+    # Colonne agregee du SELECT : le genre d'un album est celui de ses pistes.
+    "genre": [func.max(Track.genre).is_(None), func.max(Track.genre), Artist.name],
+}
+
 _ALBUM_SELECT = (
     select(Album, Artist.name, func.count(Track.id), func.max(Track.genre))
     .join(Artist, Artist.id == Album.artist_id)
@@ -172,11 +194,12 @@ def list_albums(
     q: str | None = None,
     artist_id: int | None = None,
     genre: str | None = None,
+    sort: AlbumSort = "artiste",
     limit: int = Query(default=100, le=500),
     offset: int = 0,
     db: Session = Depends(get_db),
 ) -> Page[AlbumOut]:
-    stmt = _ALBUM_SELECT.order_by(Artist.name, Album.year.is_(None), Album.year)
+    stmt = _ALBUM_SELECT.order_by(*_ALBUM_ORDERS[sort], Album.id)
     if artist_id is not None:
         stmt = stmt.where(Album.artist_id == artist_id)
     if genre:

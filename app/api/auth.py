@@ -93,6 +93,7 @@ def callback(request: Request, code: str | None = None, state: str | None = None
         "name": identity.name,
         "email": identity.email,
         "groups": identity.groups,
+        "picture": identity.picture,
     }
     request.session[SESSION_IDENTITY] = enregistree
     # Sans cette trace, la page Administration n'aurait personne a proposer.
@@ -116,6 +117,7 @@ def me(request: Request, user: CurrentUser) -> AuthStatus:
         name=user.name,
         email=session.get("email", ""),
         groups=session.get("groups", []),
+        picture=session.get("picture", ""),
         role=user.role,
         is_super_admin=user.is_super_admin,
     )

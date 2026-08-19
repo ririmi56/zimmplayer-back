@@ -23,6 +23,7 @@ from app.schemas import (
     PlaylistDetail,
     PlaylistOut,
     PlaylistTracksAdd,
+    PlaylistUpdate,
     ShareUpdate,
 )
 
@@ -49,7 +50,10 @@ def _acces(playlist: Playlist, moi: UserRow) -> Acces:
     for share in playlist.shares:
         if share.user_id == moi.id:
             return Acces.ECRITURE if share.can_edit else Acces.LECTURE
-    return Acces.AUCUN
+    # Publique n'ouvre que la consultation. Un partage en edition reste
+    # explicite : ouvrir l'ecriture a tous laisserait n'importe qui vider la
+    # playlist d'un autre, et personne ne saurait de qui c'est venu.
+    return Acces.LECTURE if playlist.is_public else Acces.AUCUN
 
 
 def _charger(db: Session, playlist_id: int, moi: UserRow, requis: Acces) -> Playlist:
@@ -78,7 +82,7 @@ def _charger(db: Session, playlist_id: int, moi: UserRow, requis: Acces) -> Play
         raise HTTPException(
             status_code=403,
             detail=(
-                "Cette playlist est partagee en lecture seule."
+                "Cette playlist est partagee en consultation seule."
                 if requis == Acces.ECRITURE
                 else "Seul le proprietaire peut faire cela."
             ),
@@ -114,6 +118,7 @@ def _sortie(playlist: Playlist, moi: UserRow, detail: bool = False, db: Session 
         "owner_name": playlist.owner.name if playlist.owner else "",
         "is_owner": acces == Acces.PROPRIETAIRE,
         "can_edit": acces >= Acces.ECRITURE,
+        "is_public": playlist.is_public,
         "track_count": len(playlist.items),
         "updated_at": playlist.updated_at,
     }
@@ -150,12 +155,20 @@ def _sortie(playlist: Playlist, moi: UserRow, detail: bool = False, db: Session 
 
 @router.get("", response_model=list[PlaylistOut])
 def list_playlists(user: CurrentUser, db: Session = Depends(get_db)) -> list[PlaylistOut]:
-    """Les miennes et celles qu'on m'a partagees, les plus recentes d'abord."""
+    """Les miennes, celles qu'on m'a partagees, et les publiques.
+
+    Les publiques des autres arrivent melangees aux miennes : c'est l'interface
+    qui les range a part, elle seule sait ce qu'elle veut en montrer.
+    """
     moi = user_row(db, user)
     partagees = select(PlaylistShare.playlist_id).where(PlaylistShare.user_id == moi.id)
     playlists = db.scalars(
         select(Playlist)
-        .where((Playlist.owner_id == moi.id) | (Playlist.id.in_(partagees)))
+        .where(
+            (Playlist.owner_id == moi.id)
+            | (Playlist.id.in_(partagees))
+            | Playlist.is_public
+        )
         .options(
             selectinload(Playlist.shares),
             selectinload(Playlist.items),
@@ -187,12 +200,16 @@ def get_playlist(
 
 
 @router.patch("/{playlist_id}", response_model=PlaylistDetail)
-def rename_playlist(
-    playlist_id: int, body: PlaylistCreate, user: CurrentUser, db: Session = Depends(get_db)
+def update_playlist(
+    playlist_id: int, body: PlaylistUpdate, user: CurrentUser, db: Session = Depends(get_db)
 ) -> PlaylistDetail:
+    """Renomme, et ouvre ou referme la playlist. Champ absent = inchange."""
     moi = user_row(db, user)
     playlist = _charger(db, playlist_id, moi, Acces.PROPRIETAIRE)
-    playlist.name = body.name.strip() or playlist.name
+    if body.name is not None:
+        playlist.name = body.name.strip() or playlist.name
+    if body.is_public is not None:
+        playlist.is_public = body.is_public
     db.commit()
     return _sortie(playlist, moi, detail=True, db=db)
 

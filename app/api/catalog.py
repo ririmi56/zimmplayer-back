@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import CurrentUser
 from app.db import get_db
-from app.models import Album, Artist, Track
+from app.models import Album, Artist, Track, TrackLike
 from app.schemas import (
     AlbumDetail,
     AlbumOut,
@@ -66,23 +66,54 @@ _ARTIST_SELECT = (
 
 # Tris proposes pour la liste des albums. Chaque cle porte son sens naturel :
 # on lit un catalogue de A a Z, mais on veut voir les derniers ajouts EN
-# PREMIER — un seul menu suffit donc, sans bouton croissant/decroissant.
+# PREMIER. `reverse` retourne ce sens-la, il ne le remplace pas.
 #
 # `Album.id` clot systematiquement la liste : sans depart unique, deux albums
 # ex aequo (meme genre, meme annee) peuvent changer de place d'une requete a
 # l'autre, et le defilement infini afficherait alors des doublons tout en
-# sautant d'autres albums.
-AlbumSort = Literal["artiste", "titre", "annee", "ajout", "genre"]
+# sautant d'autres albums. Il ne se retourne jamais : il n'est la que pour
+# rendre l'ordre stable.
+AlbumSort = Literal["artiste", "titre", "annee", "ajout", "genre", "likes"]
 
-_ALBUM_ORDERS: dict[str, list] = {
-    "artiste": [Artist.name, Album.year.is_(None), Album.year],
-    "titre": [Album.title],
-    # Sans annee en dernier : un album non date n'a rien a faire en tete.
-    "annee": [Album.year.is_(None), Album.year.desc()],
-    "ajout": [Album.created_at.desc()],
+# Sous-requete correlee plutot qu'une jointure de plus : joindre `track_likes`
+# a `_ALBUM_SELECT` multiplierait les lignes `tracks` par leurs likes, et le
+# `count(Track.id)` du nombre de titres deviendrait faux pour TOUS les tris.
+_LIKES_PAR_ALBUM = (
+    select(func.count(TrackLike.id))
+    .select_from(TrackLike)
+    .join(Track, Track.id == TrackLike.track_id)
+    .where(Track.album_id == Album.id)
+    .correlate(Album)
+    .scalar_subquery()
+)
+
+#: Par tri : la cle principale, son sens par defaut, puis les cles de
+#: departage. Seule la principale se retourne — inverser « Artiste » doit
+#: remonter les Z, pas rejouer les discographies a l'envers.
+_ALBUM_ORDERS: dict[str, tuple] = {
+    "artiste": (Artist.name, False, [Album.year.is_(None), Album.year]),
+    "titre": (Album.title, False, []),
+    "annee": (Album.year, True, []),
+    "ajout": (Album.created_at, True, []),
     # Colonne agregee du SELECT : le genre d'un album est celui de ses pistes.
-    "genre": [func.max(Track.genre).is_(None), func.max(Track.genre), Artist.name],
+    "genre": (func.max(Track.genre), False, [Artist.name]),
+    # Tous comptes confondus : c'est ce qui plait dans la maison, pas ce que
+    # j'aime moi. Les albums sans aucun like retombent derriere, par artiste.
+    "likes": (_LIKES_PAR_ALBUM, True, [Artist.name]),
 }
+
+#: Tris dont la cle principale peut manquer. Le test de nullite passe AVANT
+#: elle et ne se retourne pas : un album non date, ou sans genre, n'a rien a
+#: faire en tete, dans un sens comme dans l'autre.
+_ALBUM_NULLS_LAST = {"annee", "genre"}
+
+
+def _album_order_by(sort: str, reverse: bool) -> list:
+    cle, descendant_par_defaut, departage = _ALBUM_ORDERS[sort]
+    descendant = descendant_par_defaut != reverse
+    clauses = [cle.is_(None)] if sort in _ALBUM_NULLS_LAST else []
+    clauses.append(cle.desc() if descendant else cle.asc())
+    return [*clauses, *departage, Album.id]
 
 _ALBUM_SELECT = (
     select(Album, Artist.name, func.count(Track.id), func.max(Track.genre))
@@ -195,11 +226,12 @@ def list_albums(
     artist_id: int | None = None,
     genre: str | None = None,
     sort: AlbumSort = "artiste",
+    reverse: bool = False,
     limit: int = Query(default=100, le=500),
     offset: int = 0,
     db: Session = Depends(get_db),
 ) -> Page[AlbumOut]:
-    stmt = _ALBUM_SELECT.order_by(*_ALBUM_ORDERS[sort], Album.id)
+    stmt = _ALBUM_SELECT.order_by(*_album_order_by(sort, reverse))
     if artist_id is not None:
         stmt = stmt.where(Album.artist_id == artist_id)
     if genre:

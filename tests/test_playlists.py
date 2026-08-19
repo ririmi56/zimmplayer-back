@@ -246,7 +246,7 @@ class TestPartage:
             f"/api/playlists/{playlist['id']}/tracks", json={"track_ids": [1]}
         )
         assert refus.status_code == 403
-        assert "lecture seule" in refus.json()["detail"]
+        assert "consultation seule" in refus.json()["detail"]
 
     def test_partage_en_ecriture(self, client):
         playlist = creer(client, "Adrien")
@@ -321,3 +321,79 @@ class TestPartage:
         liste = comme(client, "Bea").get("/api/playlists").json()
         assert [p["name"] for p in liste] == ["Soiree"]
         assert liste[0]["is_owner"] is False
+
+
+class TestPublique:
+    """Publique = tout le monde consulte. Personne ne compose pour autant."""
+
+    def test_privee_par_defaut(self, client):
+        playlist = creer(client, "Adrien")
+        assert playlist["is_public"] is False
+        assert comme(client, "Bea").get(f"/api/playlists/{playlist['id']}").status_code == 404
+
+    def test_publique_visible_de_tout_le_monde(self, client):
+        playlist = creer(client, "Adrien", "Soiree")
+        comme(client, "Adrien").patch(
+            f"/api/playlists/{playlist['id']}", json={"is_public": True}
+        )
+
+        vue = comme(client, "Bea").get(f"/api/playlists/{playlist['id']}").json()
+        assert vue["is_public"] is True
+        assert vue["is_owner"] is False and vue["can_edit"] is False
+        assert [p["name"] for p in comme(client, "Bea").get("/api/playlists").json()] == ["Soiree"]
+
+    def test_publique_ne_donne_pas_l_ecriture(self, client):
+        playlist = creer(client, "Adrien")
+        comme(client, "Adrien").patch(
+            f"/api/playlists/{playlist['id']}", json={"is_public": True}
+        )
+        refus = comme(client, "Bea").post(
+            f"/api/playlists/{playlist['id']}/tracks", json={"track_ids": [1]}
+        )
+        assert refus.status_code == 403
+
+    def test_publique_ne_donne_ni_renommage_ni_suppression_ni_partage(self, client):
+        playlist = creer(client, "Adrien")
+        pid = playlist["id"]
+        comme(client, "Adrien").patch(f"/api/playlists/{pid}", json={"is_public": True})
+
+        assert comme(client, "Bea").patch(f"/api/playlists/{pid}", json={"name": "A moi"}).status_code == 403
+        assert comme(client, "Bea").delete(f"/api/playlists/{pid}").status_code == 403
+        chloe = id_de(client, "Chloe")
+        assert comme(client, "Bea").put(
+            f"/api/playlists/{pid}/shares/{chloe}", json={"can_edit": True}
+        ).status_code == 403
+
+    def test_seul_le_proprietaire_l_ouvre_et_la_referme(self, client):
+        playlist = creer(client, "Adrien")
+        pid = playlist["id"]
+        bea = id_de(client, "Bea")
+        comme(client, "Adrien").put(f"/api/playlists/{pid}/shares/{bea}", json={"can_edit": True})
+
+        # Meme partagee en edition : ouvrir au public reste au proprietaire.
+        assert comme(client, "Bea").patch(f"/api/playlists/{pid}", json={"is_public": True}).status_code == 403
+
+        comme(client, "Adrien").patch(f"/api/playlists/{pid}", json={"is_public": True})
+        assert comme(client, "Chloe").get(f"/api/playlists/{pid}").status_code == 200
+        comme(client, "Adrien").patch(f"/api/playlists/{pid}", json={"is_public": False})
+        assert comme(client, "Chloe").get(f"/api/playlists/{pid}").status_code == 404
+
+    def test_le_partage_en_edition_survit_a_la_fermeture(self, client):
+        """Refermer ne doit pas emporter les partages nommement accordes."""
+        playlist = creer(client, "Adrien")
+        pid = playlist["id"]
+        bea = id_de(client, "Bea")
+        comme(client, "Adrien").put(f"/api/playlists/{pid}/shares/{bea}", json={"can_edit": True})
+        comme(client, "Adrien").patch(f"/api/playlists/{pid}", json={"is_public": True})
+        comme(client, "Adrien").patch(f"/api/playlists/{pid}", json={"is_public": False})
+
+        vue = comme(client, "Bea").get(f"/api/playlists/{pid}").json()
+        assert vue["can_edit"] is True
+
+    def test_renommer_seul_ne_referme_pas(self, client):
+        """Un champ absent du PATCH laisse la valeur en place."""
+        playlist = creer(client, "Adrien")
+        pid = playlist["id"]
+        comme(client, "Adrien").patch(f"/api/playlists/{pid}", json={"is_public": True})
+        renommee = comme(client, "Adrien").patch(f"/api/playlists/{pid}", json={"name": "Autre"}).json()
+        assert renommee["name"] == "Autre" and renommee["is_public"] is True

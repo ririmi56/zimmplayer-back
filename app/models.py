@@ -240,6 +240,9 @@ class Playlist(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(120))
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    #: Publique = tout le monde la voit et l'ecoute. Composer a plusieurs reste
+    #: un partage explicite en edition : publique n'ouvre jamais l'ecriture.
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -280,6 +283,32 @@ class PlaylistTrack(Base):
     playlist: Mapped[Playlist] = relationship(back_populates="items")
     track: Mapped["Track"] = relationship()
     added_by: Mapped["User | None"] = relationship()
+
+
+class TrackLike(Base):
+    """Un titre aime par une personne.
+
+    Les likes portent sur les titres seulement, jamais sur les albums : c'est
+    un choix produit, pas une limite technique.
+
+    Pas de colonne `count` nulle part : le total d'un titre se compte, il ne
+    se stocke pas. Un compteur denormalise finit toujours par diverger de la
+    table qui fait foi, et rien ici n'a le volume qui justifierait ce risque.
+    """
+
+    __tablename__ = "track_likes"
+    __table_args__ = (
+        Index("uq_track_likes", "user_id", "track_id", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    track_id: Mapped[int] = mapped_column(
+        ForeignKey("tracks.id", ondelete="CASCADE"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class PlaylistShare(Base):

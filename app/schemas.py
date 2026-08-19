@@ -270,3 +270,67 @@ class PlaylistDetail(PlaylistOut):
     items: list[PlaylistItemOut]
     #: Vide pour qui n'est pas proprietaire : lui seul gere les partages.
     shares: list[PlaylistShareOut]
+
+
+class ListenReport(BaseModel):
+    track_id: int
+    #: Duree reellement ecoutee, telle que le navigateur l'a mesuree.
+    seconds: float = Field(ge=0)
+
+
+class FormatCount(BaseModel):
+    label: str
+    count: int
+
+
+class CatalogueStats(BaseModel):
+    tracks: int
+    albums: int
+    artists: int
+    total_seconds: float
+    total_bytes: int
+    #: Un titre sans duree fausse le cumul sans qu'on le voie.
+    tracks_without_duration: int
+    formats: list[FormatCount]
+    genres: list[FormatCount]
+
+
+class ListeningStats(BaseModel):
+    listens: int
+    #: Comptees PAR PERSONNE : dans une session a trois, une heure en vaut trois.
+    seconds: float
+    distinct_tracks: int
+    queue_additions: int
+
+
+class TopTrack(BaseModel):
+    track_id: int
+    title: str
+    artist_name: str
+    listens: int
+
+
+class SessionStats(BaseModel):
+    name: str
+    listens: int
+    seconds: float
+    listeners: int
+    last_listen_at: UtcDatetime | None
+    #: Faux pour une session supprimee, dont l'historique survit par son nom.
+    still_open: bool
+
+
+class GlobalStats(BaseModel):
+    catalogue: CatalogueStats
+    listening: ListeningStats
+    top_tracks: list[TopTrack]
+    sessions: list[SessionStats]
+
+
+class UserStats(BaseModel):
+    user_id: int
+    name: str
+    listens: int
+    seconds: float
+    queue_additions: int
+    last_listen_at: UtcDatetime | None

@@ -303,6 +303,81 @@ class PlaylistShare(Base):
     user: Mapped["User"] = relationship()
 
 
+class Listen(Base):
+    """Une ecoute effective, par une personne, d'un titre.
+
+    N'est enregistree qu'au-dela du seuil de comptage (voir services/stats.py) :
+    parcourir un album en sautant de titre en titre ne doit pas gonfler les
+    compteurs.
+
+    `session_name` est une copie volontaire : les sessions sont supprimees
+    couramment, et une statistique par session qui disparait avec elle ne
+    servirait a rien. `session_id` sert aux jointures tant que la session vit,
+    le nom lui survit.
+    """
+
+    __tablename__ = "listens"
+    __table_args__ = (
+        Index("ix_listens_user_at", "user_id", "listened_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    track_id: Mapped[int] = mapped_column(ForeignKey("tracks.id", ondelete="CASCADE"))
+    #: Session d'ecoute, ou None pour une ecoute solo dans le navigateur.
+    session_id: Mapped[int | None] = mapped_column(
+        ForeignKey("sessions.id", ondelete="SET NULL")
+    )
+    session_name: Mapped[str | None] = mapped_column(String(120))
+    #: Duree reellement ecoutee, pas la duree du titre.
+    seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    listened_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+    user: Mapped["User"] = relationship()
+    track: Mapped["Track"] = relationship()
+
+
+class QueueAddition(Base):
+    """Un titre ajoute a la file d'une session.
+
+    Table a part parce que `queue_items` est ephemere : la ligne disparait des
+    qu'on retire le titre ou qu'on vide la file, et l'information serait perdue.
+    """
+
+    __tablename__ = "queue_additions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    track_id: Mapped[int] = mapped_column(ForeignKey("tracks.id", ondelete="CASCADE"))
+    session_id: Mapped[int | None] = mapped_column(
+        ForeignKey("sessions.id", ondelete="SET NULL")
+    )
+    session_name: Mapped[str | None] = mapped_column(String(120))
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class SessionPresence(Base):
+    """Qui est dans quelle session, et depuis quand on l'a vu.
+
+    Le serveur ne le savait pas : l'appartenance ne vivait que dans le
+    navigateur. On la deduit de l'interrogation periodique du detail de la
+    session, seul signal existant — approximation assumee, qui ne se trompe que
+    sur quelqu'un gardant la page ouverte sans ecouter.
+    """
+
+    __tablename__ = "session_presence"
+    __table_args__ = (
+        Index("uq_session_presence", "session_id", "user_id", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("sessions.id", ondelete="CASCADE"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    user: Mapped["User"] = relationship()
+
+
 class ScanRun(Base):
     __tablename__ = "scan_runs"
 

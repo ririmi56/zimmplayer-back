@@ -12,7 +12,7 @@ from app.config import get_settings
 from app.models import Session, utcnow
 from app.services.queue import effective_position
 from app.services.snapcast import normalise_status, stream_uri, ws_target
-from app.services.snapoutput import BYTES_PER_SECOND, stream_name
+from app.services.snapoutput import BYTES_PER_SECOND, _tls_options, stream_name
 
 
 class TestStreamUri:
@@ -60,6 +60,15 @@ class TestWsTarget:
             "ws://snap.local:1780/jsonrpc",
             {},
         )
+
+    def test_l_autorite_globale_sert_de_repli(self, configure, tmp_path):
+        """SNAPCAST_TLS_CA_FILE n'est qu'une surcharge : sans elle, snapserver
+        doit etre verifie avec l'autorite maison declaree une seule fois."""
+        maison = tmp_path / "maison.pem"
+        configure(snapcast_tls="true", snapcast_tls_ca_file="", tls_ca_file=str(maison))
+        # Fichier absent : l'erreur nomme le chemin, donc il a bien ete lu.
+        with pytest.raises(FileNotFoundError):
+            ws_target("snap.local", 443, "/jsonrpc")
 
     def test_avec_tls_le_controle_et_l_audio_suivent(self, configure):
         configure(snapcast_tls="true", snapcast_tls_server_name="")
@@ -157,3 +166,39 @@ class TestEffectivePosition:
 def test_debit_pcm_attendu_par_snapcast():
     """48 kHz, 16 bits, stereo : la cadence sur laquelle repose le calcul de position."""
     assert BYTES_PER_SECOND == 48000 * 2 * 2
+
+
+class TestTlsFfmpeg:
+    """ffmpeg n'a AUCUNE verification par defaut (`tls_verify` vaut 0). Sans
+    ces options, un stockage joint en https accepterait le certificat de qui
+    se placerait sur le chemin — et l'URL presignee qui transite porte les
+    droits de lecture du bucket.
+    """
+
+    @pytest.fixture
+    def configure(self, monkeypatch):
+        def _configure(**env):
+            for key, value in env.items():
+                monkeypatch.setenv(key.upper(), value)
+            get_settings.cache_clear()
+
+        yield _configure
+        get_settings.cache_clear()
+
+    def test_en_clair_aucune_option(self, configure):
+        configure(tls_ca_file="/etc/ssl/maison.pem")
+        assert _tls_options("http://minio:9000/music/a.flac") == []
+
+    def test_https_verifie_meme_sans_autorite_maison(self, configure):
+        configure(tls_ca_file="")
+        assert _tls_options("https://minio.interne/music/a.flac") == ["-tls_verify", "1"]
+
+    def test_https_avec_autorite_maison(self, configure):
+        configure(tls_ca_file="/etc/ssl/maison.pem")
+        assert _tls_options("https://minio.interne/music/a.flac") == [
+            "-tls_verify", "1", "-ca_file", "/etc/ssl/maison.pem",
+        ]
+
+    def test_schema_insensible_a_la_casse(self, configure):
+        configure(tls_ca_file="")
+        assert _tls_options("HTTPS://minio.interne/a.flac") == ["-tls_verify", "1"]

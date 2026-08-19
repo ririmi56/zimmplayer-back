@@ -53,7 +53,8 @@ def _ssl_context(ca_file: str) -> ssl.SSLContext:
 
     `ca_file` vide signifie « magasin systeme ». Sur un reseau airgap avec un
     certificat auto-signe, pointer ici le certificat de VOTRE autorite plutot
-    que de desactiver la verification.
+    que de desactiver la verification : c'est le role de TLS_CA_FILE, dont
+    SNAPCAST_TLS_CA_FILE n'est qu'une surcharge.
     """
     return ssl.create_default_context(cafile=ca_file or None)
 
@@ -73,7 +74,9 @@ def ws_target(host: str, port: int, path: str) -> tuple[str, dict[str, Any]]:
     uri = f"{'wss' if tls else 'ws'}://{host}:{port}{path}"
     options: dict[str, Any] = {}
     if tls:
-        options["ssl"] = _ssl_context(settings.snapcast_tls_ca_file)
+        options["ssl"] = _ssl_context(
+            settings.snapcast_tls_ca_file or settings.tls_ca_file
+        )
         # server_hostname porte le SNI *et* le nom verifie contre le
         # certificat : il doit correspondre au CN/SAN, qui n'est pas forcement
         # l'adresse par laquelle on joint le serveur.

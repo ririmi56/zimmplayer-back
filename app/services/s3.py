@@ -25,6 +25,10 @@ def _client(endpoint: str) -> BaseClient:
         aws_access_key_id=settings.s3_access_key,
         aws_secret_access_key=settings.s3_secret_key,
         region_name=settings.s3_region,
+        # Autorite maison si elle est configuree, magasin systeme sinon.
+        # Jamais False : desactiver la verification rendrait le vol des
+        # identifiants S3 trivial pour qui se place sur le chemin.
+        verify=settings.tls_ca_file or None,
         config=_CONFIG,
     )
 

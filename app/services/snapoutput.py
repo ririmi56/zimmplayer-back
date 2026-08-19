@@ -54,6 +54,26 @@ def stream_name(session_name: str) -> str:
     return cleaned or "session"
 
 
+def _tls_options(url: str) -> list[str]:
+    """Verification TLS de ffmpeg, quand le stockage est joint en https.
+
+    ffmpeg ne verifie RIEN par defaut : `tls_verify` vaut 0, donc n'importe
+    quel certificat est accepte, y compris celui de qui se placerait sur le
+    chemin. On l'active des que l'URL est chiffree.
+
+    `-ca_file` REMPLACE le magasin systeme, il ne s'y ajoute pas : sans lui la
+    verification se fait sur le magasin de l'image, qui ne connait pas
+    l'autorite maison d'un reseau airgap.
+    """
+    if not url.lower().startswith("https://"):
+        return []
+    options = ["-tls_verify", "1"]
+    ca_file = get_settings().tls_ca_file
+    if ca_file:
+        options += ["-ca_file", ca_file]
+    return options
+
+
 @dataclass
 class _Desired:
     """Instantane de ce que la base demande a la sortie audio."""
@@ -238,6 +258,7 @@ class SessionOutput:
         # snapserver de plusieurs minutes d'audio en quelques secondes.
         command = [
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-re",
+            *_tls_options(url),
             "-ss", f"{max(0.0, desired.position_s):.3f}",
             "-i", url,
             "-vn",

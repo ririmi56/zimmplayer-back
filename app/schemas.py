@@ -190,6 +190,9 @@ class AuthStatus(BaseModel):
     name: str
     email: str
     groups: list[str]
+    #: Photo chez le fournisseur. Vide s'il n'en donne pas : l'interface
+    #: dessine alors un avatar a partir de l'initiale.
+    picture: str
     role: str
     #: Nomme dans la configuration : son role ne se revoque pas a l'ecran.
     is_super_admin: bool
@@ -226,6 +229,14 @@ class PlaylistCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
 
 
+class PlaylistUpdate(BaseModel):
+    """Modification partielle : un champ absent laisse la valeur en place."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    #: Vrai = visible et ecoutable par tout le monde, en consultation seule.
+    is_public: bool | None = None
+
+
 class PlaylistTracksAdd(BaseModel):
     """Des titres nommes un par un, ou tout un album."""
 
@@ -239,7 +250,7 @@ class PlaylistMove(BaseModel):
 
 
 class ShareUpdate(BaseModel):
-    #: Faux = lecture seule ; vrai = peut aussi ajouter et retirer des titres.
+    #: Faux = consultation seule ; vrai = peut aussi ajouter et retirer des titres.
     can_edit: bool = False
 
 
@@ -262,6 +273,7 @@ class PlaylistOut(BaseModel):
     owner_name: str
     is_owner: bool
     can_edit: bool
+    is_public: bool
     track_count: int
     updated_at: UtcDatetime
 

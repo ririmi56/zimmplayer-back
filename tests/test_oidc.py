@@ -119,6 +119,17 @@ class TestIdentiteDepuisJeton:
         identite = oidc.identity_from_token(fournisseur(nonce="n1", **revendications), "n1")
         assert identite.name == attendu
 
+    def test_photo_reprise_du_fournisseur(self, fournisseur):
+        jeton = fournisseur(nonce="n1", picture="https://authentik.interne/media/a.png")
+        identite = oidc.identity_from_token(jeton, "n1")
+        assert identite.picture == "https://authentik.interne/media/a.png"
+
+    def test_sans_photo_le_champ_reste_vide(self, fournisseur):
+        """Beaucoup de fournisseurs n'emettent pas `picture` : l'interface
+        dessine alors l'initiale, elle ne doit pas recevoir None."""
+        identite = oidc.identity_from_token(fournisseur(nonce="n1"), "n1")
+        assert identite.picture == ""
+
     def test_groupe_unique_annonce_comme_chaine(self, fournisseur):
         """Certains fournisseurs emettent une chaine quand il n'y a qu'un
         groupe. Sans ce rattrapage, on itererait sur ses lettres."""

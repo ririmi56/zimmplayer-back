@@ -53,6 +53,9 @@ class Identity:
     name: str
     email: str
     groups: list[str] = field(default_factory=list)
+    #: URL de la photo chez le fournisseur, vide s'il n'en donne pas. On ne
+    #: la rapatrie pas : c'est le navigateur qui la charge, ou pas.
+    picture: str = ""
 
 
 def ca_file() -> str:
@@ -272,6 +275,7 @@ def identity_from_token(id_token: str, nonce: str | None) -> Identity:
         name=claims.get("name") or claims.get("preferred_username") or claims.get("email") or subject,
         email=claims.get("email") or "",
         groups=[str(group) for group in groups],
+        picture=str(claims.get("picture") or ""),
     )
 
 

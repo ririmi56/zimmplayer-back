@@ -179,3 +179,158 @@ class MoveItem(BaseModel):
 
 class SeekRequest(BaseModel):
     position_s: float = Field(ge=0)
+
+
+class AuthStatus(BaseModel):
+    """Ce que l'interface doit savoir pour afficher, ou non, une connexion."""
+
+    oidc_enabled: bool
+    authenticated: bool
+    subject: str
+    name: str
+    email: str
+    groups: list[str]
+    role: str
+    #: Nomme dans la configuration : son role ne se revoque pas a l'ecran.
+    is_super_admin: bool
+
+
+class UserOut(BaseModel):
+    """Une personne deja connectee, telle que la page Administration l'affiche."""
+
+    id: int
+    subject: str
+    name: str
+    email: str
+    is_admin: bool
+    #: Nomme dans la configuration : sa bascule est desactivee a l'ecran.
+    is_super_admin: bool
+    last_seen_at: UtcDatetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdminUpdate(BaseModel):
+    is_admin: bool
+
+
+class PersonOut(BaseModel):
+    """Une personne connue, telle qu'un selecteur de partage l'affiche."""
+
+    id: int
+    name: str
+    email: str
+
+
+class PlaylistCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+class PlaylistTracksAdd(BaseModel):
+    """Des titres nommes un par un, ou tout un album."""
+
+    track_ids: list[int] | None = None
+    album_id: int | None = None
+
+
+class PlaylistMove(BaseModel):
+    #: Rang visé dans la playlist, borné par l'API.
+    to_index: int = Field(ge=0)
+
+
+class ShareUpdate(BaseModel):
+    #: Faux = lecture seule ; vrai = peut aussi ajouter et retirer des titres.
+    can_edit: bool = False
+
+
+class PlaylistShareOut(BaseModel):
+    user_id: int
+    name: str
+    can_edit: bool
+
+
+class PlaylistItemOut(BaseModel):
+    id: int
+    track: TrackOut
+    #: Qui a ajoute ce titre, sur une playlist partagee en ecriture.
+    added_by: str | None
+
+
+class PlaylistOut(BaseModel):
+    id: int
+    name: str
+    owner_name: str
+    is_owner: bool
+    can_edit: bool
+    track_count: int
+    updated_at: UtcDatetime
+
+
+class PlaylistDetail(PlaylistOut):
+    items: list[PlaylistItemOut]
+    #: Vide pour qui n'est pas proprietaire : lui seul gere les partages.
+    shares: list[PlaylistShareOut]
+
+
+class ListenReport(BaseModel):
+    track_id: int
+    #: Duree reellement ecoutee, telle que le navigateur l'a mesuree.
+    seconds: float = Field(ge=0)
+
+
+class FormatCount(BaseModel):
+    label: str
+    count: int
+
+
+class CatalogueStats(BaseModel):
+    tracks: int
+    albums: int
+    artists: int
+    total_seconds: float
+    total_bytes: int
+    #: Un titre sans duree fausse le cumul sans qu'on le voie.
+    tracks_without_duration: int
+    formats: list[FormatCount]
+    genres: list[FormatCount]
+
+
+class ListeningStats(BaseModel):
+    listens: int
+    #: Comptees PAR PERSONNE : dans une session a trois, une heure en vaut trois.
+    seconds: float
+    distinct_tracks: int
+    queue_additions: int
+
+
+class TopTrack(BaseModel):
+    track_id: int
+    title: str
+    artist_name: str
+    listens: int
+
+
+class SessionStats(BaseModel):
+    name: str
+    listens: int
+    seconds: float
+    listeners: int
+    last_listen_at: UtcDatetime | None
+    #: Faux pour une session supprimee, dont l'historique survit par son nom.
+    still_open: bool
+
+
+class GlobalStats(BaseModel):
+    catalogue: CatalogueStats
+    listening: ListeningStats
+    top_tracks: list[TopTrack]
+    sessions: list[SessionStats]
+
+
+class UserStats(BaseModel):
+    user_id: int
+    name: str
+    listens: int
+    seconds: float
+    queue_additions: int
+    last_listen_at: UtcDatetime | None

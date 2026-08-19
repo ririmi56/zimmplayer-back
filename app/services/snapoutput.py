@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session as DbSession
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import QueueItem, Session, Track
-from app.services import appsettings, queue as queue_service, s3, snapcast
+from app.services import appsettings, queue as queue_service, s3, snapcast, stats
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +84,7 @@ class _Desired:
     track_id: int | None
     object_key: str | None
     position_s: float
+    duration_s: float | None
 
 
 class SessionOutput:
@@ -101,6 +102,8 @@ class SessionOutput:
 
         self._applied_seq = -1
         self._item_id: int | None = None
+        #: Ecoute deja comptee pour l'element en cours (une fois par passage).
+        self._compte = False
         self._bytes_written = 0
         self._track_start_s = 0.0
 
@@ -180,6 +183,7 @@ class SessionOutput:
                 self._bytes_written += len(chunk)
                 if now - last_flush >= _POSITION_FLUSH_S:
                     self._flush_position(db)
+                    self._compter_ecoute(db, desired)
                     last_flush = now
         except Exception:
             logger.exception("session %s : boucle de sortie interrompue", self.session_id)
@@ -236,6 +240,7 @@ class SessionOutput:
             track_id=track.id if track else None,
             object_key=track.object_key if track else None,
             position_s=session.position_s or 0.0,
+            duration_s=track.duration_s if track else None,
         )
 
     def _reconcile(self, desired: _Desired) -> None:
@@ -269,6 +274,7 @@ class SessionOutput:
             command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
         )
         self._item_id = desired.item_id
+        self._compte = False
         self._bytes_written = 0
         self._track_start_s = max(0.0, desired.position_s)
         logger.info(
@@ -298,6 +304,32 @@ class SessionOutput:
             queue_service.next_item(db, session)
             db.commit()
         self._applied_seq = -1  # force la reconciliation au prochain tour
+
+    def _compter_ecoute(self, db: DbSession, desired: _Desired) -> None:
+        """Compte l'ecoute une fois le seuil franchi, pour tous les presents.
+
+        Cote serveur et non cote navigateur : en session le son sort d'ici, et
+        c'est le seul endroit qui sache vraiment ce qui a ete joue. Chacun des
+        presents recoit sa ligne — c'est ce qui permet de repondre a « combien
+        ai-je ecoute » et pas seulement « qu'ai-je fait jouer ».
+        """
+        if self._compte or desired.track_id is None:
+            return
+        if self.position_s < stats.seuil(desired.duration_s):
+            return
+        try:
+            db.rollback()
+            session = db.get(Session, self.session_id)
+            if session is None:
+                return
+            auditeurs = stats.presents(db, self.session_id)
+            self._compte = True
+            stats.enregistrer_ecoute(
+                db, auditeurs, desired.track_id, self.position_s, session
+            )
+        except SQLAlchemyError as exc:
+            logger.debug("session %s : ecoute non comptee (%s)", self.session_id, exc)
+            db.rollback()
 
     def _flush_position(self, db: DbSession) -> None:
         """Remonte la position pour l'interface, sans passer pour un ordre.

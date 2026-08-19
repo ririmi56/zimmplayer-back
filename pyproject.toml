@@ -14,6 +14,12 @@ dependencies = [
     "mutagen>=1.47",
     "pillow>=11.0",
     "websockets>=14.0",
+    # OIDC : validation des jetons (pyjwt), appels au fournisseur (httpx, dont
+    # on maitrise le magasin de certificats), signature du cookie de session
+    # (itsdangerous, requis par SessionMiddleware de Starlette).
+    "pyjwt[crypto]>=2.9",
+    "httpx>=0.28",
+    "itsdangerous>=2.2",
 ]
 
 [project.optional-dependencies]

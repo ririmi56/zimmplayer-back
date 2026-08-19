@@ -299,10 +299,231 @@ chaud, il doit donc être présent même s'il ne sert pas.
 
 ### Identité
 
-Sans authentification, l'identité se résume à un pseudo choisi côté client,
-envoyé en en-tête `X-User-Name`. C'est ce pseudo qui s'affiche à côté des
-titres ajoutés. À l'arrivée d'OIDC, seul `app/auth.py` change — toutes les
-routes injectent déjà `CurrentUser`.
+C'est le pseudo, ou l'identité OIDC, qui s'affiche à côté des titres ajoutés à
+une file partagée — voir [Identité et OIDC](#identite-et-oidc). Le nom du
+snapclient qu'est le navigateur vient de la même source, jamais d'un
+renommage indépendant.
+
+## Identite et OIDC
+
+Deux modes, choisis par `OIDC_ENABLED`.
+
+**Sans OIDC** (defaut), l'identite se resume au pseudo saisi dans l'ecran
+Configuration et transmis dans l'en-tete `X-User-Name`. Rien n'est verifie :
+ce mode convient au developpement et a un poste isole.
+
+**Avec OIDC**, l'identite vient d'un jeton valide par le fournisseur.
+La boite de saisie du pseudo disparait, et **`X-User-Name` cesse d'etre lue** —
+la laisser active offrirait un chemin trivial pour se faire passer pour
+quelqu'un d'autre, ce qui viderait l'authentification de son sens.
+
+### Ce qui est mis en oeuvre
+
+Code d'autorisation avec **PKCE**, l'API jouant le **client confidentiel**.
+Le navigateur ne recoit jamais de jeton, seulement un cookie de session signe.
+Ce n'est pas un detail d'implementation : le relais audio est une **WebSocket**,
+qui ne peut pas porter d'en-tete `Authorization` depuis le navigateur — mais
+qui porte les cookies.
+
+Aucun jeton n'est conserve apres la connexion, seulement l'identite validee.
+Il n'y a donc ni rafraichissement ni jeton au repos ; la session applicative a
+sa propre duree (`SESSION_MAX_AGE_S`), au terme de laquelle il faut se
+reconnecter.
+
+Seule l'URL de l'emetteur est configuree : les points d'entree sont lus dans
+son document de decouverte. **Authentik, Keycloak, Dex, Zitadel ou Entra se
+branchent donc de la meme facon.**
+
+| Variable | Role |
+|---|---|
+| `OIDC_ENABLED` | Bascule entre les deux modes |
+| `OIDC_ISSUER` | URL de l'emetteur, **sans** `/.well-known` |
+| `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | Le client declare chez le fournisseur |
+| `OIDC_SCOPES` | `openid` obligatoire ; `groups` pour recevoir les groupes |
+| `OIDC_GROUPS_CLAIM` | Revendication portant les groupes (`groups` chez Authentik) |
+| `SUPER_ADMINS` | Comptes toujours administrateurs (`sub` ou courriel, separes par des virgules) |
+| `OIDC_CA_FILE` | Surcharge de `TLS_CA_FILE` pour le seul fournisseur |
+| `SESSION_SECRET` | **Obligatoire** si OIDC est actif. `openssl rand -hex 32` |
+| `PUBLIC_BASE_URL` | Sert a construire l'URI de redirection |
+
+**URI de redirection a declarer chez le fournisseur** :
+`<PUBLIC_BASE_URL>/api/auth/callback`, au caractere pres.
+
+### Certificats
+
+Le fournisseur est joint avec le magasin de `TLS_CA_FILE` (voir plus haut), ou
+celui d'`OIDC_CA_FILE` s'il est signe par une autre autorite. La verification
+n'est jamais desactivable : un fournisseur d'identite usurpe permettrait de
+forger n'importe quelle connexion.
+
+Un certificat refuse le dit clairement, en nommant le reglage a poser :
+
+```
+decouverte OIDC impossible sur https://idp.interne/.well-known/openid-configuration :
+le certificat du fournisseur est refuse (unable to get local issuer certificate).
+Sur un reseau airgap, renseigner OIDC_CA_FILE ou TLS_CA_FILE avec l'autorite
+qui l'a signe.
+```
+
+### Roles
+
+Deux sources, et deux seulement :
+
+- **`SUPER_ADMINS`**, liste de comptes toujours administrateurs. C'est par eux
+  que l'on entre la premiere fois, et leur role **ne se retire pas depuis
+  l'interface** : meme si la base est perdue ou si quelqu'un se retrograde, ces
+  comptes-la font toujours entrer ;
+- la **promotion accordee a l'ecran**, conservee dans la table `users`. Un
+  administrateur peut nommer d'autres administrateurs.
+
+Chaque entree de `SUPER_ADMINS` est comparee au `sub` **et** au courriel du
+jeton. Le nom affiche n'est deliberement pas compare : chez beaucoup de
+fournisseurs chacun peut modifier le sien, il suffirait de se renommer pour
+devenir administrateur.
+
+Les groupes du jeton sont lus et affiches, mais **ne donnent aucun role** : la
+gestion se fait dans l'application, pas chez le fournisseur.
+
+`/api/admin/*` repond **403** a qui n'est pas administrateur. Sans OIDC, tout
+le monde l'est : sans fournisseur d'identite, distinguer les roles n'aurait
+aucun fondement, et restreindre rendrait l'application inadministrable.
+
+#### Ce qui ne peut pas arriver
+
+- **se retirer soi-meme le role** : refuse, ce serait fermer la porte derriere
+  soi sans retour possible a l'ecran ;
+- **retrograder un compte de `SUPER_ADMINS`** : refuse, son role vient de la
+  configuration et le changer ici donnerait l'illusion d'avoir agi ;
+- **retirer le dernier administrateur** quand aucun super-administrateur
+  connu n'existe : refuse.
+
+#### La table `users`
+
+Elle n'existe que pour porter `is_admin`. Tout le reste de l'identite vient du
+jeton a chaque requete, le fournisseur restant la source de verite ; `name` et
+`email` n'en sont qu'une copie rafraichie a chaque connexion, pour que la page
+Administration affiche une liste lisible.
+
+Consequence assumee : **on ne peut promouvoir que quelqu'un qui s'est deja
+connecte au moins une fois.** Aucune API OIDC standard ne permet de lister les
+comptes d'un fournisseur.
+
+### Verification
+
+`scripts/check_oidc.sh` (depot d'orchestration) rejoue le flux complet contre
+**Dex**, servi en TLS avec une autorite maison. Dex n'est pas Authentik, et
+c'est le but : si le flux passe la, c'est qu'il ne depend d'aucune
+particularite du fournisseur. Le script verifie aussi qu'**un certificat non
+approuve fait echouer la connexion**.
+
+## Playlists
+
+Une selection de titres qu'on garde, par opposition a la file d'une session
+qui est ce qui joue maintenant et se vide en avancant. Les deux ne se
+rejoignent qu'au moment ou l'on envoie l'une dans l'autre.
+
+### Droits
+
+Une seule fonction en decide (`_acces` dans `api/playlists.py`), et toutes les
+routes s'y referent : un droit recalcule route par route finit toujours par
+diverger quelque part, et c'est la divergence qui ouvre le trou.
+
+| | Voir | Ajouter, retirer | Renommer, supprimer, partager |
+|---|---|---|---|
+| Proprietaire | oui | oui | oui |
+| Partage en ecriture | oui | oui | **non** |
+| Partage en lecture | oui | non | non |
+| Les autres | non | non | non |
+
+Partager en ecriture sert a composer a plusieurs, pas a se transmettre la
+playlist — d'ou le « non » de la troisieme colonne.
+
+Une playlist qu'on n'a pas le droit de voir repond **404**, jamais 403 : un
+403 confirmerait son existence a qui n'a rien a y faire.
+
+Seul le proprietaire recoit la liste des partages. La donner aux autres
+reviendrait a diffuser qui ecoute avec qui, sans que cela leur serve.
+
+### Ce qui merite d'etre su
+
+- **le meme titre peut y figurer plusieurs fois** : c'est parfois voulu, et
+  l'interdire compliquerait sans rendre service. D'ou une cle propre sur
+  `playlist_tracks` plutot qu'un couple (playlist, piste) unique ;
+- **un identifiant caduc ne fait pas echouer tout l'ajout** : les identifiants
+  viennent du client, on ne garde que ceux qui existent. Sinon la contrainte de
+  cle etrangere ferait perdre le lot entier pour un seul titre disparu ;
+- **`GET /api/users`** liste les personnes connues, pour choisir avec qui
+  partager. Accessible a tous et non aux seuls administrateurs — sans elle,
+  personne ne pourrait partager. On n'expose que le nom et le courriel, ce
+  qu'un carnet d'adresses montrerait ;
+- **on ne partage qu'avec quelqu'un deja passe** au moins une fois : aucune API
+  OIDC standard ne permet de lister les comptes d'un fournisseur. Sans OIDC,
+  la ligne `users` est creee a la demande, au premier appel fait au nom d'un
+  pseudo ;
+- **supprimer un compte emporte ses playlists**, mais pas les titres qu'il
+  avait mis dans celles des autres : `added_by_id` passe a NULL au lieu de
+  faire disparaitre la ligne.
+
+## Statistiques
+
+Deux moities aux natures opposees, et c'est ce qu'il faut retenir.
+
+Les statistiques du **catalogue** se calculent sur l'existant : nombre de
+titres, d'albums, d'artistes, duree cumulee, repartition par format et par
+genre. Elles sont justes depuis toujours.
+
+Celles **par personne** n'ont aucun passe. Rien n'etait enregistre, et
+`queue_items` est efface au fur et a mesure : il n'y a rien a reconstituer.
+Elles repartent de zero le jour du deploiement.
+
+### Ce qui compte comme une ecoute
+
+La moitie du titre, ou quatre minutes, au premier des deux (regle de Last.fm).
+Parcourir un album en sautant de titre en titre ne gonfle donc pas les
+compteurs, et un morceau vraiment ecoute compte meme si l'on coupe avant la
+fin. Une duree inconnue retombe sur le plafond, faute de quoi elle offrirait un
+moyen de compter des la premiere seconde.
+
+### Qui est credite
+
+**Tous les presents d'une session**, pas seulement celui qui a ajoute le titre.
+On mesure ce que chacun a ecoute, pas ce qu'il a fait jouer aux autres.
+
+Consequence a connaitre : les secondes sont comptees **par personne**. Une
+heure de musique ecoutee a trois vaut trois heures d'ecoute cumulee. C'est
+voulu, et l'interface le dit.
+
+### D'ou viennent les mesures
+
+| Situation | Qui compte | Pourquoi |
+|---|---|---|
+| Session | Le serveur, dans `snapoutput` | Le son sort de la, c'est le seul endroit qui sache ce qui a ete joue |
+| Ecoute solo | Le navigateur, via `POST /api/stats/listens` | L'API ne sert qu'une redirection vers le stockage : elle ne voit rien passer |
+
+Les valeurs annoncees par le navigateur sont bornees par la duree du titre et
+revalidees contre le seuil. Cela n'empeche pas un client de mentir dans ces
+bornes : **ces compteurs ne sont pas une preuve**, ce sont des statistiques.
+
+### La presence, deduite
+
+Le serveur ne savait pas qui etait dans une session — l'appartenance ne vivait
+que dans le navigateur. Elle se deduit de l'interrogation periodique de
+`GET /api/sessions/{id}`, que seul un membre effectue en boucle. Approximation
+assumee : elle ne se trompe que sur quelqu'un qui garderait la page ouverte
+sans ecouter.
+
+### Sessions supprimees
+
+`listens.session_name` recopie le nom au moment de l'ecoute. Les sessions sont
+supprimees couramment ; sans cette copie, leur historique disparaitrait avec
+elles et la statistique par session ne servirait a rien.
+
+### Visibilite
+
+`GET /api/stats` est ouvert a tous : c'est l'etat du serveur.
+`GET /api/stats/users` est **reserve aux administrateurs** — c'est le seul
+endroit ou l'activite de quelqu'un est visible par un autre. La route est
+gardee, pas seulement l'onglet qui l'affiche.
 
 ## Genre et paroles
 

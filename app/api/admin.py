@@ -1,11 +1,11 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.auth import CurrentUser
+from app.auth import AdminUser, is_super_admin
 from app.db import get_db
-from app.models import ScanError, ScanRun
-from app.schemas import ScanErrorOut, ScanRunOut
+from app.models import ScanError, ScanRun, User
+from app.schemas import AdminUpdate, ScanErrorOut, ScanRunOut, UserOut
 from app.services import scanner
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 @router.post("/scan", response_model=ScanRunOut, status_code=202)
 def start_scan(
-    user: CurrentUser,
+    user: AdminUser,
     background: BackgroundTasks,
     force: bool = Query(
         default=False,
@@ -33,21 +33,21 @@ def start_scan(
 
 
 @router.get("/scan/status", response_model=ScanRunOut | None)
-def scan_status(user: CurrentUser, db: Session = Depends(get_db)) -> ScanRun | None:
+def scan_status(user: AdminUser, db: Session = Depends(get_db)) -> ScanRun | None:
     """Dernier scan lance, en cours ou termine."""
     return db.scalar(select(ScanRun).order_by(ScanRun.id.desc()).limit(1))
 
 
 @router.get("/scan/history", response_model=list[ScanRunOut])
 def scan_history(
-    user: CurrentUser, limit: int = 10, db: Session = Depends(get_db)
+    user: AdminUser, limit: int = 10, db: Session = Depends(get_db)
 ) -> list[ScanRun]:
     return list(db.scalars(select(ScanRun).order_by(ScanRun.id.desc()).limit(limit)))
 
 
 @router.get("/scan/errors", response_model=list[ScanErrorOut])
 def scan_errors(
-    user: CurrentUser,
+    user: AdminUser,
     run_id: int | None = None,
     limit: int = 200,
     db: Session = Depends(get_db),
@@ -64,4 +64,95 @@ def scan_errors(
             .order_by(ScanError.id)
             .limit(limit)
         )
+    )
+
+
+# --- Utilisateurs ----------------------------------------------------------
+
+
+def _sortie(row: User) -> UserOut:
+    return UserOut(
+        id=row.id,
+        subject=row.subject,
+        name=row.name,
+        email=row.email,
+        # Un super-administrateur est admin sans etre marque en base : son
+        # role vient de la configuration, pas d'une promotion.
+        is_admin=row.is_admin or is_super_admin(row.subject, row.email),
+        is_super_admin=is_super_admin(row.subject, row.email),
+        last_seen_at=row.last_seen_at,
+    )
+
+
+@router.get("/users", response_model=list[UserOut])
+def list_users(user: AdminUser, db: Session = Depends(get_db)) -> list[UserOut]:
+    """Les personnes deja connectees, les plus recentes d'abord.
+
+    Il n'y a personne d'autre a proposer : aucune API OIDC standard ne permet
+    de lister les comptes d'un fournisseur. On ne promeut donc que quelqu'un
+    qui s'est deja connecte au moins une fois.
+    """
+    rows = db.scalars(select(User).order_by(User.last_seen_at.desc()))
+    return [_sortie(row) for row in rows]
+
+
+@router.put("/users/{user_id}/admin", response_model=UserOut)
+def set_admin(
+    user_id: int,
+    body: AdminUpdate,
+    user: AdminUser,
+    db: Session = Depends(get_db),
+) -> UserOut:
+    """Accorde ou retire le role d'administrateur."""
+    row = db.get(User, user_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+
+    if is_super_admin(row.subject, row.email):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Ce compte est administrateur par la configuration du serveur "
+                "(SUPER_ADMINS) : son role ne se change pas ici."
+            ),
+        )
+
+    # Se retirer soi-meme le role fermerait la porte derriere soi, sans
+    # avertissement et sans retour possible depuis l'interface.
+    if not body.is_admin and row.subject == user.subject:
+        raise HTTPException(
+            status_code=409,
+            detail="Vous ne pouvez pas retirer votre propre role d'administrateur.",
+        )
+
+    # Et sans super-administrateur configure, retirer le dernier rendrait
+    # l'application inadministrable autrement qu'en base.
+    if not body.is_admin and row.is_admin:
+        restants = db.scalar(
+            select(func.count(User.id)).where(User.is_admin, User.id != row.id)
+        )
+        if not restants and not _un_super_admin_existe(db):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "C'est le dernier administrateur, et aucun compte n'est "
+                    "nomme dans SUPER_ADMINS : le retirer rendrait "
+                    "l'application inadministrable."
+                ),
+            )
+
+    row.is_admin = body.is_admin
+    db.commit()
+    return _sortie(row)
+
+
+def _un_super_admin_existe(db: Session) -> bool:
+    """Un compte deja connu correspond-il a la configuration ?
+
+    On ne se contente pas de regarder si SUPER_ADMINS est renseigne : une
+    entree qui ne correspond a personne ne protege de rien.
+    """
+    return any(
+        is_super_admin(subject, email)
+        for subject, email in db.execute(select(User.subject, User.email))
     )

@@ -326,6 +326,14 @@ class TopTrack(BaseModel):
     listens: int
 
 
+class TopArtist(BaseModel):
+    artist_id: int
+    name: str
+    listens: int
+    seconds: float
+    distinct_tracks: int
+
+
 class SessionStats(BaseModel):
     name: str
     listens: int
@@ -340,6 +348,7 @@ class GlobalStats(BaseModel):
     catalogue: CatalogueStats
     listening: ListeningStats
     top_tracks: list[TopTrack]
+    top_artists: list[TopArtist]
     sessions: list[SessionStats]
 
 

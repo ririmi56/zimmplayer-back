@@ -19,6 +19,7 @@ def global_stats(user: CurrentUser, db: Session = Depends(get_db)) -> GlobalStat
         catalogue=service.catalogue(db),
         listening=service.ecoute_globale(db),
         top_tracks=service.top_titres(db),
+        top_artists=service.top_artistes(db),
         sessions=service.par_session(db),
     )
 

@@ -170,3 +170,90 @@ class TestCatalogue:
 
     def test_les_statistiques_globales_sont_visibles_par_tous(self, client):
         assert client.get("/api/stats").status_code == 200
+
+
+@pytest.fixture
+def discotheque():
+    """Trois artistes, ecoutes inegalement.
+
+    Base a part : les tests du catalogue comptent les artistes, en ajouter a
+    leur fixture les ferait tomber.
+    """
+    moteur = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(moteur)
+    Fabrique = sessionmaker(bind=moteur)
+    with Fabrique() as db:
+        pistes = {}
+        for nom in ("Longue", "Prolifique", "Ignore"):
+            artiste = Artist(name=nom)
+            db.add(artiste)
+            db.flush()
+            album = Album(artist_id=artiste.id, source_title=nom, title=nom)
+            db.add(album)
+            db.flush()
+            pistes[nom] = []
+            for i in range(2):
+                piste = Track(
+                    album_id=album.id, artist_id=artiste.id,
+                    object_key=f"{nom}{i}", object_key_hash=f"h{nom}{i}",
+                    source_title=f"{nom} {i}", title=f"{nom} {i}",
+                    etag="e", size_bytes=1, duration_s=300,
+                )
+                db.add(piste)
+                db.flush()
+                pistes[nom].append(piste.id)
+
+        utilisateur = User(subject="a", name="Adrien")
+        db.add(utilisateur)
+        db.flush()
+
+        # « Longue » : deux ecoutes, mais 600 s au total.
+        for piste_id in pistes["Longue"]:
+            db.add(Listen(user_id=utilisateur.id, track_id=piste_id, seconds=300.0))
+        # « Prolifique » : cinq ecoutes, mais 250 s — toujours le meme titre.
+        for _ in range(5):
+            db.add(Listen(user_id=utilisateur.id, track_id=pistes["Prolifique"][0], seconds=50.0))
+        db.commit()
+    yield Fabrique
+    moteur.dispose()
+
+
+class TestParArtiste:
+    def test_le_classement_se_fait_sur_le_temps_cumule(self, discotheque):
+        """Le choix qui distingue cette section de « Les plus écoutés » : un
+        artiste de morceaux courts ne doit pas passer devant a coups d'ecoutes
+        breves. « Prolifique » a plus d'ecoutes, « Longue » a plus de temps."""
+        with discotheque() as db:
+            lignes = stats.top_artistes(db)
+        assert [l["name"] for l in lignes] == ["Longue", "Prolifique"]
+        assert lignes[0]["seconds"] == 600.0 and lignes[0]["listens"] == 2
+        assert lignes[1]["seconds"] == 250.0 and lignes[1]["listens"] == 5
+
+    def test_un_artiste_jamais_ecoute_n_apparait_pas(self, discotheque):
+        """La jointure part des ecoutes : « Ignore » a bien deux titres au
+        catalogue, mais rien a montrer ici."""
+        with discotheque() as db:
+            assert "Ignore" not in [l["name"] for l in stats.top_artistes(db)]
+
+    def test_les_titres_differents_sont_comptes_sans_doublon(self, discotheque):
+        """« Prolifique » a ete ecoute cinq fois, mais sur un seul titre."""
+        with discotheque() as db:
+            lignes = {l["name"]: l for l in stats.top_artistes(db)}
+        assert lignes["Longue"]["distinct_tracks"] == 2
+        assert lignes["Prolifique"]["distinct_tracks"] == 1
+
+    def test_les_ecoutes_detachees_comptent_encore(self, discotheque):
+        """Supprimer un compte detache ses ecoutes sans les effacer : elles
+        doivent rester dans ce classement, sinon le menage dans l'annuaire
+        reecrirait l'histoire de la maison."""
+        with discotheque() as db:
+            db.query(Listen).filter(Listen.seconds == 300.0).update({"user_id": None})
+            db.commit()
+            lignes = {l["name"]: l for l in stats.top_artistes(db)}
+        assert lignes["Longue"]["seconds"] == 600.0
+
+    def test_la_limite_est_respectee(self, discotheque):
+        with discotheque() as db:
+            assert len(stats.top_artistes(db, limite=1)) == 1

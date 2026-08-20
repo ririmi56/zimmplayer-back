@@ -209,6 +209,10 @@ class UserOut(BaseModel):
     #: Nomme dans la configuration : sa bascule est desactivee a l'ecran.
     is_super_admin: bool
     last_seen_at: UtcDatetime
+    #: Ce que la suppression emporterait : ses playlists partent avec lui.
+    playlist_count: int = 0
+    #: Ce qu'elle laisserait : les ecoutes sont detachees, jamais effacees.
+    listen_count: int = 0
 
     model_config = ConfigDict(from_attributes=True)
 

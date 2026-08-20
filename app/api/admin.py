@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import AdminUser, is_super_admin
 from app.db import get_db
-from app.models import ScanError, ScanRun, User
+from app.models import Listen, Playlist, ScanError, ScanRun, User
 from app.schemas import AdminUpdate, ScanErrorOut, ScanRunOut, UserOut
 from app.services import scanner
 
@@ -70,12 +70,14 @@ def scan_errors(
 # --- Utilisateurs ----------------------------------------------------------
 
 
-def _sortie(row: User) -> UserOut:
+def _sortie(row: User, playlists: int = 0, ecoutes: int = 0) -> UserOut:
     return UserOut(
         id=row.id,
         subject=row.subject,
         name=row.name,
         email=row.email,
+        playlist_count=playlists,
+        listen_count=ecoutes,
         # Un super-administrateur est admin sans etre marque en base : son
         # role vient de la configuration, pas d'une promotion.
         is_admin=row.is_admin or is_super_admin(row.subject, row.email),
@@ -92,8 +94,24 @@ def list_users(user: AdminUser, db: Session = Depends(get_db)) -> list[UserOut]:
     de lister les comptes d'un fournisseur. On ne promeut donc que quelqu'un
     qui s'est deja connecte au moins une fois.
     """
-    rows = db.scalars(select(User).order_by(User.last_seen_at.desc()))
-    return [_sortie(row) for row in rows]
+    # Deux sous-requetes correlees : l'ecran de suppression doit annoncer ce
+    # qui va disparaitre, et ce qui va survivre.
+    playlists = (
+        select(func.count(Playlist.id))
+        .where(Playlist.owner_id == User.id)
+        .correlate(User)
+        .scalar_subquery()
+    )
+    ecoutes = (
+        select(func.count(Listen.id))
+        .where(Listen.user_id == User.id)
+        .correlate(User)
+        .scalar_subquery()
+    )
+    rows = db.execute(
+        select(User, playlists, ecoutes).order_by(User.last_seen_at.desc())
+    )
+    return [_sortie(row, n_playlists, n_ecoutes) for row, n_playlists, n_ecoutes in rows]
 
 
 @router.put("/users/{user_id}/admin", response_model=UserOut)
@@ -156,3 +174,43 @@ def _un_super_admin_existe(db: Session) -> bool:
         is_super_admin(subject, email)
         for subject, email in db.execute(select(User.subject, User.email))
     )
+
+
+@router.delete("/users/{user_id}", status_code=204)
+def delete_user(user_id: int, user: AdminUser, db: Session = Depends(get_db)) -> None:
+    """Retire une personne de la base, pour faire le menage.
+
+    Suppression au sens de l'annuaire, pas de l'histoire : les ecoutes sont
+    detachees et non effacees (`listens.user_id` passe a NULL), si bien que les
+    totaux et le classement des titres restent justes. Partent en revanche avec
+    le compte, par cascade : ses playlists, ses likes, ses favoris et les
+    partages dont il beneficiait.
+
+    Sans OIDC, ou si la personne se reconnecte, la ligne reapparait a la
+    prochaine visite : ce menage vaut pour qui n'est jamais revenu.
+    """
+    row = db.get(User, user_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+
+    # Se supprimer soi-meme fermerait la porte derriere soi, comme se retirer
+    # son propre role.
+    if row.subject == user.subject:
+        raise HTTPException(
+            status_code=409, detail="Vous ne pouvez pas supprimer votre propre compte."
+        )
+
+    # Un super-administrateur revient administrateur des sa prochaine visite :
+    # supprimer sa ligne ne ferait que perdre ses playlists pour rien.
+    if is_super_admin(row.subject, row.email):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Ce compte est administrateur par la configuration du serveur "
+                "(SUPER_ADMINS) : le supprimer ne ferait que le recreer a sa "
+                "prochaine connexion."
+            ),
+        )
+
+    db.delete(row)
+    db.commit()

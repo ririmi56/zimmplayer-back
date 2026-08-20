@@ -378,7 +378,14 @@ class Listen(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    #: Detache, et non supprime, quand le compte disparait : ce qui a ete
+    #: ecoute dans la maison l'a ete pour de bon. Les totaux et le classement
+    #: des titres restent donc justes apres un menage dans les comptes ; seul
+    #: le detail par personne perd la ligne, `par_utilisateur` partant des
+    #: comptes existants.
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
     track_id: Mapped[int] = mapped_column(ForeignKey("tracks.id", ondelete="CASCADE"))
     #: Session d'ecoute, ou None pour une ecoute solo dans le navigateur.
     session_id: Mapped[int | None] = mapped_column(
@@ -389,7 +396,7 @@ class Listen(Base):
     seconds: Mapped[float] = mapped_column(Float, default=0.0)
     listened_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
-    user: Mapped["User"] = relationship()
+    user: Mapped["User | None"] = relationship()
     track: Mapped["Track"] = relationship()
 
 

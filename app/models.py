@@ -311,6 +311,33 @@ class TrackLike(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class AlbumFavorite(Base):
+    """Un album mis en favori par une personne.
+
+    Distinct des likes de titres, qui restent des titres : on peut garder un
+    album sous la main sans aimer chacun de ses morceaux, et aimer un morceau
+    sans vouloir de l'album. Les deux comptes ne se melangent donc pas, et le
+    catalogue offre un tri pour chacun.
+
+    Pas de colonne `count`, pour la meme raison que `TrackLike` : le total se
+    compte, il ne se stocke pas.
+    """
+
+    __tablename__ = "album_favorites"
+    __table_args__ = (
+        Index("uq_album_favorites", "user_id", "album_id", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    album_id: Mapped[int] = mapped_column(
+        ForeignKey("albums.id", ondelete="CASCADE"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class PlaylistShare(Base):
     """Partage d'une playlist avec une personne, en lecture ou en ecriture."""
 
@@ -351,7 +378,14 @@ class Listen(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    #: Detache, et non supprime, quand le compte disparait : ce qui a ete
+    #: ecoute dans la maison l'a ete pour de bon. Les totaux et le classement
+    #: des titres restent donc justes apres un menage dans les comptes ; seul
+    #: le detail par personne perd la ligne, `par_utilisateur` partant des
+    #: comptes existants.
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
     track_id: Mapped[int] = mapped_column(ForeignKey("tracks.id", ondelete="CASCADE"))
     #: Session d'ecoute, ou None pour une ecoute solo dans le navigateur.
     session_id: Mapped[int | None] = mapped_column(
@@ -362,7 +396,7 @@ class Listen(Base):
     seconds: Mapped[float] = mapped_column(Float, default=0.0)
     listened_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
-    user: Mapped["User"] = relationship()
+    user: Mapped["User | None"] = relationship()
     track: Mapped["Track"] = relationship()
 
 

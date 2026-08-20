@@ -277,3 +277,42 @@ def top_titres(db: DbSession, limite: int = 10) -> list[dict]:
         {"track_id": t.id, "title": t.title, "artist_name": a, "listens": n}
         for t, a, n in lignes
     ]
+
+
+def top_artistes(db: DbSession, limite: int = 15) -> list[dict]:
+    """Les artistes les plus ecoutes, le temps cumule d'abord.
+
+    Classes sur les SECONDES et non sur le nombre d'ecoutes : un artiste de
+    morceaux courts passerait devant a nombre egal, alors que la question posee
+    est « qui ecoute-t-on le plus ». Le nombre d'ecoutes reste affiche a cote,
+    il dit autre chose.
+
+    L'artiste est celui de la PISTE, comme partout ailleurs dans le catalogue.
+    Une compilation compte donc pour chacun de ses interpretes, et non pour
+    l'artiste de l'album.
+    """
+    lignes = db.execute(
+        select(
+            Artist.id,
+            Artist.name,
+            func.count(Listen.id),
+            func.coalesce(func.sum(Listen.seconds), 0.0),
+            func.count(func.distinct(Listen.track_id)),
+        )
+        .select_from(Listen)
+        .join(Track, Track.id == Listen.track_id)
+        .join(Artist, Artist.id == Track.artist_id)
+        .group_by(Artist.id, Artist.name)
+        .order_by(func.sum(Listen.seconds).desc(), Artist.name)
+        .limit(limite)
+    ).all()
+    return [
+        {
+            "artist_id": artist_id,
+            "name": nom,
+            "listens": n,
+            "seconds": float(secondes),
+            "distinct_tracks": titres,
+        }
+        for artist_id, nom, n, secondes, titres in lignes
+    ]

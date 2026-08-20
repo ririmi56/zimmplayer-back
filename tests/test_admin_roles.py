@@ -6,13 +6,14 @@ toucher aucune base reelle.
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401  (enregistre les tables)
 from app.config import get_settings
 from app.db import Base, get_db
+from app.models import Album, Artist, Listen, Playlist, Track
 from app.models import User as UserRow
 
 
@@ -21,6 +22,16 @@ def base():
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
+
+    # SQLite ignore les cles etrangeres tant qu'on ne le lui demande pas, et
+    # c'est le serveur qui applique ici les regles de suppression : sans ce
+    # PRAGMA, supprimer un compte laisserait ses playlists et ses ecoutes
+    # intactes dans la base de test, et les tests attesteraient d'un
+    # comportement que MariaDB n'a pas.
+    @event.listens_for(engine, "connect")
+    def _cles_etrangeres(connexion, _record):  # pragma: no cover - branchement
+        connexion.execute("PRAGMA foreign_keys=ON")
+
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     yield Session
@@ -172,3 +183,135 @@ class TestAttribution:
         client = app_test(None, super_admins="chef@x")
         connecter(client, "u-1", "chef@x")
         assert client.put("/api/admin/users/999/admin", json={"is_admin": True}).status_code == 404
+
+
+def musique(base):
+    """Un titre, le minimum pour pouvoir enregistrer une ecoute."""
+    with base() as db:
+        artiste = Artist(name="Groupe")
+        db.add(artiste)
+        db.flush()
+        album = Album(artist_id=artiste.id, source_title="Album", title="Album")
+        db.add(album)
+        db.flush()
+        piste = Track(
+            album_id=album.id, artist_id=artiste.id,
+            object_key="k", object_key_hash="h",
+            source_title="Titre", title="Titre", track_no=1,
+            etag="e", size_bytes=1,
+        )
+        db.add(piste)
+        db.commit()
+        return piste.id
+
+
+class TestSuppression:
+    """Le menage dans l'annuaire : qui part, et ce qu'il laisse derriere lui.
+
+    L'enjeu n'est pas la ligne `users`, c'est ce qui y est accroche. Les
+    ecoutes sont detachees pour que les statistiques globales restent justes,
+    les playlists partent avec leur proprietaire.
+    """
+
+    def test_le_compte_disparait_de_la_liste(self, app_test, base):
+        peupler(base, ("u-1", "Chef", "chef@x", False), ("u-2", "Passant", "p@x", False))
+        client = app_test(None, super_admins="chef@x")
+        connecter(client, "u-1", "chef@x")
+
+        cible = next(u for u in client.get("/api/admin/users").json() if u["subject"] == "u-2")
+        assert client.delete(f"/api/admin/users/{cible['id']}").status_code == 204
+        restants = [u["subject"] for u in client.get("/api/admin/users").json()]
+        assert restants == ["u-1"]
+
+    def test_les_ecoutes_survivent_detachees(self, app_test, base):
+        """Le coeur de la fonctionnalite : ce qui a ete ecoute dans la maison
+        l'a ete pour de bon. Un `ON DELETE CASCADE` ici ferait maigrir les
+        statistiques globales a chaque menage."""
+        peupler(base, ("u-1", "Chef", "chef@x", False), ("u-2", "Passant", "p@x", False))
+        track_id = musique(base)
+        client = app_test(None, super_admins="chef@x")
+        connecter(client, "u-1", "chef@x")
+        cible = next(u for u in client.get("/api/admin/users").json() if u["subject"] == "u-2")
+
+        with base() as db:
+            db.add(Listen(user_id=cible["id"], track_id=track_id, seconds=120.0))
+            db.commit()
+
+        assert client.delete(f"/api/admin/users/{cible['id']}").status_code == 204
+
+        with base() as db:
+            ecoutes = db.query(Listen).all()
+            assert len(ecoutes) == 1
+            assert ecoutes[0].user_id is None
+            assert ecoutes[0].seconds == 120.0
+
+    def test_les_playlists_partent_avec_le_compte(self, app_test, base):
+        peupler(base, ("u-1", "Chef", "chef@x", False), ("u-2", "Passant", "p@x", False))
+        client = app_test(None, super_admins="chef@x")
+        connecter(client, "u-1", "chef@x")
+        cible = next(u for u in client.get("/api/admin/users").json() if u["subject"] == "u-2")
+
+        with base() as db:
+            db.add(Playlist(owner_id=cible["id"], name="La sienne"))
+            db.commit()
+
+        assert client.delete(f"/api/admin/users/{cible['id']}").status_code == 204
+        with base() as db:
+            assert db.query(Playlist).count() == 0
+
+    def test_la_liste_annonce_ce_qui_est_en_jeu(self, app_test, base):
+        """L'ecran doit pouvoir avertir AVANT de supprimer : sans ces
+        compteurs, on effacerait des playlists sans le savoir."""
+        peupler(base, ("u-1", "Chef", "chef@x", False), ("u-2", "Passant", "p@x", False))
+        track_id = musique(base)
+        client = app_test(None, super_admins="chef@x")
+        connecter(client, "u-1", "chef@x")
+        cible = next(u for u in client.get("/api/admin/users").json() if u["subject"] == "u-2")
+
+        with base() as db:
+            db.add(Playlist(owner_id=cible["id"], name="La sienne"))
+            db.add(Listen(user_id=cible["id"], track_id=track_id, seconds=1.0))
+            db.add(Listen(user_id=cible["id"], track_id=track_id, seconds=2.0))
+            db.commit()
+
+        vue = {u["subject"]: u for u in client.get("/api/admin/users").json()}
+        assert vue["u-2"]["playlist_count"] == 1
+        assert vue["u-2"]["listen_count"] == 2
+        # Les compteurs sont bien par personne, pas des totaux recopies.
+        assert vue["u-1"]["playlist_count"] == 0
+        assert vue["u-1"]["listen_count"] == 0
+
+    def test_on_ne_se_supprime_pas_soi_meme(self, app_test, base):
+        peupler(base, ("u-2", "Promu", "p@x", True))
+        client = app_test(None, super_admins="")
+        connecter(client, "u-2", "p@x")
+        moi = client.get("/api/admin/users").json()[0]
+        reponse = client.delete(f"/api/admin/users/{moi['id']}")
+        assert reponse.status_code == 409
+        assert "propre compte" in reponse.json()["detail"]
+
+    def test_un_super_administrateur_ne_se_supprime_pas(self, app_test, base):
+        """Sa ligne reviendrait a sa prochaine visite : on n'aurait perdu que
+        ses playlists."""
+        peupler(base, ("u-1", "Chef", "chef@x", False), ("u-3", "Fixe", "fixe@x", False))
+        client = app_test(None, super_admins="chef@x,fixe@x")
+        connecter(client, "u-1", "chef@x")
+        cible = next(u for u in client.get("/api/admin/users").json() if u["subject"] == "u-3")
+        reponse = client.delete(f"/api/admin/users/{cible['id']}")
+        assert reponse.status_code == 409
+        assert "SUPER_ADMINS" in reponse.json()["detail"]
+
+    def test_compte_inconnu(self, app_test, base):
+        peupler(base, ("u-1", "Chef", "chef@x", False))
+        client = app_test(None, super_admins="chef@x")
+        connecter(client, "u-1", "chef@x")
+        assert client.delete("/api/admin/users/9999").status_code == 404
+
+    def test_un_non_administrateur_est_refuse(self, app_test, base):
+        peupler(base, ("u-1", "Simple", "s@x", False), ("u-2", "Autre", "a@x", False))
+        client = app_test(None, super_admins="")
+        connecter(client, "u-1", "s@x")
+        # Il ne peut meme pas lister : on vise donc un identifiant au hasard.
+        assert client.delete("/api/admin/users/2").status_code == 403
+        with base() as db:
+            assert db.query(UserRow).count() == 2

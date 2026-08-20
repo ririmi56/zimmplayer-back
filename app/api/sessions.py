@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
+from app.api.catalog import _track_out
 from app.auth import CurrentUser, user_row
 from app.db import get_db
 from app.models import Album, Artist, QueueItem, Session, Track
@@ -19,37 +20,19 @@ from app.schemas import (
     SessionCreate,
     SessionDetail,
     SessionOut,
-    TrackOut,
 )
 from app.services import queue as queue_service, stats, snapoutput
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 
-def _track_out(track: Track, album: Album, artist: Artist) -> TrackOut:
-    return TrackOut(
-        id=track.id,
-        title=track.title,
-        track_no=track.track_no,
-        disc_no=track.disc_no,
-        duration_s=track.duration_s,
-        format=track.format,
-        bitrate=track.bitrate,
-        album_id=track.album_id,
-        album_title=album.title,
-        artist_id=track.artist_id,
-        artist_name=artist.name,
-        has_cover=album.cover_file is not None,
-        genre=track.genre,
-        has_lyrics=False,
-        overrides=track.overrides or {},
-    )
-
-
 def _items_out(db: DbSession, session: Session) -> list[QueueItemOut]:
     """Charge la file en une requete plutot qu'un aller-retour par element."""
     rows = db.execute(
-        select(QueueItem, Track, Album, Artist)
+        # `lyrics` est une colonne differee : on remonte sa PRESENCE, calculee
+        # en SQL, et jamais son contenu — y toucher via l'objet declencherait
+        # une requete par piste, et des kilo-octets de texte dans chaque file.
+        select(QueueItem, Track, Album, Artist, Track.lyrics.is_not(None))
         .join(Track, Track.id == QueueItem.track_id)
         .join(Album, Album.id == Track.album_id)
         .join(Artist, Artist.id == Track.artist_id)
@@ -62,9 +45,9 @@ def _items_out(db: DbSession, session: Session) -> list[QueueItemOut]:
             position=item.position,
             added_by=item.added_by,
             added_at=item.added_at,
-            track=_track_out(track, album, artist),
+            track=_track_out(track, album.title, album.cover_file, artist.name, paroles),
         )
-        for item, track, album, artist in rows
+        for item, track, album, artist, paroles in rows
     ]
 
 

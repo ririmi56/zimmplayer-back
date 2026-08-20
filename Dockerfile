@@ -25,5 +25,16 @@ COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 8000
+
+# Sonde de l'image : elle interroge la disponibilite, pas la vivacite — sous
+# Docker il n'y a qu'un seul verdict, et le seul utile a `depends_on:
+# service_healthy` est « prete a repondre ». Python plutot que curl : il est
+# deja la, l'image n'embarque aucun client HTTP.
+# `start-period` couvre les migrations Alembic du point d'entree, qui peuvent
+# etre longues sur une grosse base ; les echecs y sont ignores.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=3 \
+    CMD python -c "import urllib.request as u; \
+u.urlopen('http://127.0.0.1:8000/api/health/ready', timeout=4)" || exit 1
+
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

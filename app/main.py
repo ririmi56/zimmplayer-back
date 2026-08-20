@@ -11,6 +11,7 @@ from app.api import (
     auth,
     catalog,
     edit,
+    favorites,
     likes,
     playlists,
     sessions,
@@ -125,6 +126,7 @@ app.include_router(auth.directory)
 app.include_router(catalog.router)
 app.include_router(playlists.router)
 app.include_router(likes.router)
+app.include_router(favorites.router)
 app.include_router(stats.router)
 app.include_router(stream.router)
 app.include_router(edit.router)

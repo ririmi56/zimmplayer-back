@@ -5,9 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import Select, func, select, text
 from sqlalchemy.orm import Session
 
-from app.auth import CurrentUser
+from app.auth import CurrentUser, user_row
 from app.db import get_db
-from app.models import Album, Artist, Track, TrackLike
+from app.models import Album, AlbumFavorite, Artist, Track, TrackLike
 from app.schemas import (
     AlbumDetail,
     AlbumOut,
@@ -73,7 +73,7 @@ _ARTIST_SELECT = (
 # l'autre, et le defilement infini afficherait alors des doublons tout en
 # sautant d'autres albums. Il ne se retourne jamais : il n'est la que pour
 # rendre l'ordre stable.
-AlbumSort = Literal["artiste", "titre", "annee", "ajout", "genre", "likes"]
+AlbumSort = Literal["artiste", "titre", "annee", "ajout", "genre", "likes", "favoris"]
 
 # Sous-requete correlee plutot qu'une jointure de plus : joindre `track_likes`
 # a `_ALBUM_SELECT` multiplierait les lignes `tracks` par leurs likes, et le
@@ -83,6 +83,15 @@ _LIKES_PAR_ALBUM = (
     .select_from(TrackLike)
     .join(Track, Track.id == TrackLike.track_id)
     .where(Track.album_id == Album.id)
+    .correlate(Album)
+    .scalar_subquery()
+)
+
+# Meme precaution que pour les likes : une sous-requete correlee, pas une
+# jointure — `album_favorites` multiplierait les lignes `tracks`.
+_FAVORIS_PAR_ALBUM = (
+    select(func.count(AlbumFavorite.id))
+    .where(AlbumFavorite.album_id == Album.id)
     .correlate(Album)
     .scalar_subquery()
 )
@@ -100,6 +109,9 @@ _ALBUM_ORDERS: dict[str, tuple] = {
     # Tous comptes confondus : c'est ce qui plait dans la maison, pas ce que
     # j'aime moi. Les albums sans aucun like retombent derriere, par artiste.
     "likes": (_LIKES_PAR_ALBUM, True, [Artist.name]),
+    # Combien de personnes ont mis CET album en favori — a ne pas confondre
+    # avec « likes », qui additionne les likes de ses titres.
+    "favoris": (_FAVORIS_PAR_ALBUM, True, [Artist.name]),
 }
 
 #: Tris dont la cle principale peut manquer. Le test de nullite passe AVANT
@@ -227,11 +239,21 @@ def list_albums(
     genre: str | None = None,
     sort: AlbumSort = "artiste",
     reverse: bool = False,
+    favoris: bool = False,
     limit: int = Query(default=100, le=500),
     offset: int = 0,
     db: Session = Depends(get_db),
 ) -> Page[AlbumOut]:
     stmt = _ALBUM_SELECT.order_by(*_album_order_by(sort, reverse))
+    if favoris:
+        # MES favoris, pas ceux de la maison : le filtre est personnel la ou le
+        # tri « favoris » compte tout le monde.
+        moi = user_row(db, user)
+        stmt = stmt.where(
+            Album.id.in_(
+                select(AlbumFavorite.album_id).where(AlbumFavorite.user_id == moi.id)
+            )
+        )
     if artist_id is not None:
         stmt = stmt.where(Album.artist_id == artist_id)
     if genre:

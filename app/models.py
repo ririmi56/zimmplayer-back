@@ -311,6 +311,33 @@ class TrackLike(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class AlbumFavorite(Base):
+    """Un album mis en favori par une personne.
+
+    Distinct des likes de titres, qui restent des titres : on peut garder un
+    album sous la main sans aimer chacun de ses morceaux, et aimer un morceau
+    sans vouloir de l'album. Les deux comptes ne se melangent donc pas, et le
+    catalogue offre un tri pour chacun.
+
+    Pas de colonne `count`, pour la meme raison que `TrackLike` : le total se
+    compte, il ne se stocke pas.
+    """
+
+    __tablename__ = "album_favorites"
+    __table_args__ = (
+        Index("uq_album_favorites", "user_id", "album_id", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    album_id: Mapped[int] = mapped_column(
+        ForeignKey("albums.id", ondelete="CASCADE"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class PlaylistShare(Base):
     """Partage d'une playlist avec une personne, en lecture ou en ecriture."""
 

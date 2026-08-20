@@ -1,10 +1,11 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.api import (
     admin,
@@ -20,7 +21,7 @@ from app.api import (
     stream,
 )
 from app.config import get_settings
-from app.db import SessionLocal, engine
+from app.db import SessionLocal, get_db
 from app.services import snapoutput
 
 # Sans cela, les journaux de l'application (scan, sortie snapcast) n'apparaissent
@@ -80,7 +81,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Zimmplayer API",
-    version="0.1.0",
+    version="1.0.0",
     openapi_url="/api/openapi.json",
     docs_url="/api/docs",
     lifespan=lifespan,
@@ -135,11 +136,48 @@ app.include_router(snapcast.router)
 app.include_router(admin.router)
 
 
-@app.get("/api/health")
-def health() -> dict[str, str]:
+def _etat_base(db: Session) -> tuple[bool, str]:
+    """Vrai si la base repond, avec le nom de l'erreur sinon."""
     try:
-        with engine.connect() as connection:
-            connection.execute(text("SELECT 1"))
+        db.execute(text("SELECT 1"))
     except Exception as exc:  # pragma: no cover - depend de l'infra
-        return {"status": "degraded", "database": type(exc).__name__}
-    return {"status": "ok", "database": "ok"}
+        return False, type(exc).__name__
+    return True, "ok"
+
+
+@app.get("/api/health")
+def health(db: Session = Depends(get_db)) -> dict[str, str]:
+    """Diagnostic humain : repond toujours 200, l'etat est dans le corps.
+
+    C'est la route documentee depuis toujours ; les orchestrateurs, eux,
+    utilisent /api/health/live et /api/health/ready, qui repondent par leur
+    code HTTP.
+    """
+    ok, base = _etat_base(db)
+    return {"status": "ok" if ok else "degraded", "database": base}
+
+
+@app.get("/api/health/live")
+def live() -> dict[str, str]:
+    """Le processus repond-il encore ?
+
+    Volontairement sans aucune dependance : une sonde de vivacite qui touche
+    la base ferait TUER l'API a chaque indisponibilite de MariaDB, alors que
+    le redemarrage n'y changerait rien — et le redemarrage en boucle
+    empecherait la reprise au retour de la base.
+    """
+    return {"status": "ok"}
+
+
+@app.get("/api/health/ready")
+def ready(response: Response, db: Session = Depends(get_db)) -> dict[str, str]:
+    """Peut-on lui envoyer du trafic ?
+
+    Presque toutes les routes lisent la base : sans elle, l'API repondrait des
+    erreurs a tout le monde. Un 503 la retire du service le temps que la base
+    revienne, sans que le processus soit tue.
+    """
+    ok, base = _etat_base(db)
+    if not ok:
+        response.status_code = 503
+    return {"status": "ok" if ok else "degraded", "database": base}

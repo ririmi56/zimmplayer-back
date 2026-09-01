@@ -151,6 +151,12 @@ class SessionOut(BaseModel):
     created_at: UtcDatetime
     snapcast_stream_id: str | None
     item_count: int = 0
+    #: Pour signaler d'un coup d'oeil, depuis la liste, celles qui jouent.
+    is_playing: bool = False
+    #: Titres restant a lire APRES le titre courant — la meme definition que
+    #: le « N titres a suivre » de la page Lecture. Sans titre courant, toute
+    #: la file est a suivre.
+    upcoming_count: int = 0
 
 
 class SessionDetail(SessionOut):

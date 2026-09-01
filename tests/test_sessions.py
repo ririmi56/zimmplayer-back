@@ -289,3 +289,59 @@ class TestLecturesDansLaFile:
             items = _items_out(db, session)
         assert items[0].track.listen_count == 4
         assert items[1].track.listen_count == 0
+
+
+class TestListeDesSessions:
+    """Ce que la liste annonce sans qu'on ouvre la session : joue-t-elle, et
+    combien de titres restent."""
+
+    def _liste(self, db):
+        from app.api.sessions import list_sessions
+
+        return list_sessions(user=None, db=db)
+
+    def test_une_session_a_l_arret_le_dit(self, longue_file):
+        base, session_id = longue_file
+        with base() as db:
+            sortie = self._liste(db)[0]
+        assert sortie.is_playing is False
+        assert sortie.item_count == 8
+
+    def test_sans_titre_courant_toute_la_file_est_a_suivre(self, longue_file):
+        base, session_id = longue_file
+        with base() as db:
+            assert self._liste(db)[0].upcoming_count == 8
+
+    def test_le_compte_a_suivre_exclut_le_courant_et_les_joues(self, longue_file):
+        base, session_id = longue_file
+        with base() as db:
+            session = db.get(Session, session_id)
+            session.current_item_id = queue_service.ordered_items(db, session_id)[2].id
+            session.is_playing = True
+            db.commit()
+            sortie = self._liste(db)[0]
+        # 8 titres, le 3e en cours : deux joues, un courant, cinq a suivre.
+        assert sortie.is_playing is True
+        assert sortie.item_count == 8
+        assert sortie.upcoming_count == 5
+
+    def test_sur_le_dernier_titre_il_ne_reste_rien(self, longue_file):
+        base, session_id = longue_file
+        with base() as db:
+            session = db.get(Session, session_id)
+            session.current_item_id = queue_service.ordered_items(db, session_id)[-1].id
+            db.commit()
+            assert self._liste(db)[0].upcoming_count == 0
+
+    def test_le_nombre_total_reste_juste(self, longue_file):
+        """Les deux comptes portent sur la meme table et ne doivent pas se
+        marcher dessus : `item_count` vient d'une jointure sur `queue_items`,
+        « a suivre » d'une sous-requete sur la meme table. C'est
+        `correlate(Session)` qui les separe."""
+        base, session_id = longue_file
+        with base() as db:
+            session = db.get(Session, session_id)
+            session.current_item_id = queue_service.ordered_items(db, session_id)[0].id
+            db.commit()
+            sortie = self._liste(db)[0]
+        assert (sortie.item_count, sortie.upcoming_count) == (8, 7)

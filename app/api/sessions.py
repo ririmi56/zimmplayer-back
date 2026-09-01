@@ -95,10 +95,36 @@ def _get_item(db: DbSession, session: Session, item_id: int) -> QueueItem:
     return item
 
 
+# Position du titre courant, et nombre de titres qui le suivent.
+#
+# `correlate(Session)` n'est pas decoratif : il dit que SEUL `sessions` vient
+# de la requete englobante. `queue_items` obtient donc son propre FROM dans la
+# sous-requete, sans se faire happer par la jointure que `list_sessions` a
+# deja sur cette table pour compter la file.
+_POSITION_COURANTE = (
+    select(QueueItem.position)
+    .where(QueueItem.id == Session.current_item_id)
+    .correlate(Session)
+    .scalar_subquery()
+)
+
+# `coalesce(..., -1)` couvre la session qui n'a pas encore de titre courant :
+# tout est alors « a suivre », ce qui est exactement le cas.
+_A_SUIVRE = (
+    select(func.count(QueueItem.id))
+    .where(
+        QueueItem.session_id == Session.id,
+        QueueItem.position > func.coalesce(_POSITION_COURANTE, -1),
+    )
+    .correlate(Session)
+    .scalar_subquery()
+)
+
+
 @router.get("", response_model=list[SessionOut])
 def list_sessions(user: CurrentUser, db: DbSession = Depends(get_db)) -> list[SessionOut]:
     rows = db.execute(
-        select(Session, func.count(QueueItem.id))
+        select(Session, func.count(QueueItem.id), _A_SUIVRE)
         .outerjoin(QueueItem, QueueItem.session_id == Session.id)
         .group_by(Session.id)
         .order_by(Session.name)
@@ -111,8 +137,10 @@ def list_sessions(user: CurrentUser, db: DbSession = Depends(get_db)) -> list[Se
             created_at=session.created_at,
             snapcast_stream_id=session.snapcast_stream_id,
             item_count=count,
+            is_playing=session.is_playing,
+            upcoming_count=a_suivre,
         )
-        for session, count in rows
+        for session, count, a_suivre in rows
     ]
 
 

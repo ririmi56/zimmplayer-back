@@ -1,6 +1,6 @@
 [project]
 name = "zimmplayer-back"
-version = "1.0.0"
+version = "1.1.0-dev"
 description = "Catalogue et streaming d'une bibliotheque musicale stockee sur S3/MinIO"
 requires-python = ">=3.12"
 dependencies = [

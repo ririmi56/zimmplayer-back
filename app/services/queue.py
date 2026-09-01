@@ -6,6 +6,7 @@ deplacer ce pointeur. On garde ainsi gratuitement l'historique, le retour
 arriere et la relecture, et « vider la file » reste une action explicite.
 """
 
+import random
 from datetime import datetime
 
 from sqlalchemy import func, select
@@ -126,6 +127,36 @@ def move_item(db: DbSession, session: Session, item: QueueItem, to_index: int) -
     to_index = max(0, min(to_index, len(items)))
     items.insert(to_index, item)
     for position, entry in enumerate(items):
+        entry.position = position
+    db.flush()
+
+
+def shuffle_upcoming(db: DbSession, session: Session) -> None:
+    """Rebat les titres qui suivent le titre courant.
+
+    Ce qui est deja joue ne bouge pas, et le titre en cours non plus : le
+    melange porte sur la suite, jamais sur l'histoire. Deplacer le titre en
+    cours reviendrait d'ailleurs a faire sauter la lecture, la position d'un
+    element servant aussi d'ordre de lecture.
+
+    Sans titre courant, rien n'a encore ete joue : toute la file est « a
+    suivre » et se trouve donc rebattue.
+
+    Un coup unique, pas un mode : l'ordre obtenu est reel, visible dans le
+    panneau, et chacun peut encore deplacer un titre a la main ensuite. Il n'y
+    a donc aucun etat de melange a conserver cote serveur.
+    """
+    items = ordered_items(db, session.id)
+    ids = [i.id for i in items]
+    depart = ids.index(session.current_item_id) + 1 if session.current_item_id in ids else 0
+
+    suite = items[depart:]
+    # A un seul titre pres, il n'y a rien a rebattre : autant ne pas ecrire.
+    if len(suite) < 2:
+        return
+
+    random.shuffle(suite)
+    for position, entry in enumerate(items[:depart] + suite):
         entry.position = position
     db.flush()
 

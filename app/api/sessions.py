@@ -220,6 +220,19 @@ def clear_queue(
     return _detail(db, session)
 
 
+@router.post("/{session_id}/queue/shuffle", response_model=SessionDetail)
+def shuffle_queue(
+    session_id: int, user: CurrentUser, db: DbSession = Depends(get_db)
+) -> SessionDetail:
+    """Rebat la suite de la file. La lecture en cours n'est pas interrompue :
+    seules changent les positions des titres qui viennent apres elle."""
+    session = _get(db, session_id)
+    queue_service.shuffle_upcoming(db, session)
+    db.commit()
+    db.refresh(session)
+    return _detail(db, session)
+
+
 @router.post("/{session_id}/queue/{item_id}/move", response_model=SessionDetail)
 def move_in_queue(
     session_id: int,

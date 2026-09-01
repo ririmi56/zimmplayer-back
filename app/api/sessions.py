@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
-from app.api.catalog import _track_out
+from app.api.catalog import _LECTURES_PAR_TITRE, _track_out
 from app.auth import CurrentUser, user_row
 from app.db import get_db
 from app.models import Album, Artist, QueueItem, Session, Track
@@ -32,7 +32,14 @@ def _items_out(db: DbSession, session: Session) -> list[QueueItemOut]:
         # `lyrics` est une colonne differee : on remonte sa PRESENCE, calculee
         # en SQL, et jamais son contenu — y toucher via l'objet declencherait
         # une requete par piste, et des kilo-octets de texte dans chaque file.
-        select(QueueItem, Track, Album, Artist, Track.lyrics.is_not(None))
+        # `_LECTURES_PAR_TITRE` vient du catalogue : sans lui, la file
+        # annoncerait zero ecoute pour tous ses titres. C'est exactement le
+        # defaut qu'avait `has_lyrics` avant le 2026-08-20 — un assembleur
+        # nourri d'une valeur par defaut ne se voit pas, il se decouvre.
+        select(
+            QueueItem, Track, Album, Artist,
+            Track.lyrics.is_not(None), _LECTURES_PAR_TITRE,
+        )
         .join(Track, Track.id == QueueItem.track_id)
         .join(Album, Album.id == Track.album_id)
         .join(Artist, Artist.id == Track.artist_id)
@@ -45,9 +52,11 @@ def _items_out(db: DbSession, session: Session) -> list[QueueItemOut]:
             position=item.position,
             added_by=item.added_by,
             added_at=item.added_at,
-            track=_track_out(track, album.title, album.cover_file, artist.name, paroles),
+            track=_track_out(
+                track, album.title, album.cover_file, artist.name, paroles, lectures
+            ),
         )
-        for item, track, album, artist, paroles in rows
+        for item, track, album, artist, paroles, lectures in rows
     ]
 
 

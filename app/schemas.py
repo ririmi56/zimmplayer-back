@@ -56,6 +56,10 @@ class TrackOut(BaseModel):
     # Les paroles ne sont pas embarquees ici : elles sont volumineuses et
     # servies a la demande par /api/tracks/{id}/lyrics.
     has_lyrics: bool = False
+    #: Nombre d'ecoutes, toutes personnes confondues : un titre passe en
+    #: session a trois en vaut trois. Zero se lit tel quel — c'est ce qui
+    #: permet de reperer ce que personne n'ecoute.
+    listen_count: int = 0
     overrides: dict[str, Any] = {}
 
 

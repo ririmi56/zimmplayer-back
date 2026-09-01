@@ -16,7 +16,7 @@ import app.models  # noqa: F401
 from app.api.sessions import _items_out
 from app.db import Base
 from app.services import queue as queue_service
-from app.models import Album, Artist, QueueItem, Session, Track
+from app.models import Album, Artist, Listen, QueueItem, Session, Track
 
 
 @pytest.fixture
@@ -266,3 +266,26 @@ class TestMelangerLaSuite:
                 db.flush()
                 ordres.add(tuple(_titres(db, session_id)))
         assert len(ordres) > 1
+
+
+class TestLecturesDansLaFile:
+    """La file annonce le compteur d'ecoutes de chaque titre.
+
+    Elle assemble ses `TrackOut` par une requete a elle : le compteur doit y
+    etre remonte explicitement. C'est exactement le chemin qui avait fait
+    annoncer `has_lyrics: false` partout pendant des mois — un assembleur
+    nourri d'une valeur par defaut ne se voit pas, il se decouvre.
+    """
+
+    def test_le_compteur_suit_les_ecoutes(self, file_dattente):
+        base, session_id = file_dattente
+        with base() as db:
+            session = db.get(Session, session_id)
+            premier = queue_service.ordered_items(db, session_id)[0]
+            for _ in range(4):
+                db.add(Listen(user_id=None, track_id=premier.track_id, seconds=90.0))
+            db.commit()
+
+            items = _items_out(db, session)
+        assert items[0].track.listen_count == 4
+        assert items[1].track.listen_count == 0

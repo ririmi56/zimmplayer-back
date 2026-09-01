@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
-from app.api.catalog import _track_out
+from app.api.catalog import _LECTURES_PAR_TITRE, _track_out
 from app.auth import CurrentUser, user_row
 from app.db import get_db
 from app.models import Album, Artist, QueueItem, Session, Track
@@ -32,7 +32,14 @@ def _items_out(db: DbSession, session: Session) -> list[QueueItemOut]:
         # `lyrics` est une colonne differee : on remonte sa PRESENCE, calculee
         # en SQL, et jamais son contenu — y toucher via l'objet declencherait
         # une requete par piste, et des kilo-octets de texte dans chaque file.
-        select(QueueItem, Track, Album, Artist, Track.lyrics.is_not(None))
+        # `_LECTURES_PAR_TITRE` vient du catalogue : sans lui, la file
+        # annoncerait zero ecoute pour tous ses titres. C'est exactement le
+        # defaut qu'avait `has_lyrics` avant le 2026-08-20 — un assembleur
+        # nourri d'une valeur par defaut ne se voit pas, il se decouvre.
+        select(
+            QueueItem, Track, Album, Artist,
+            Track.lyrics.is_not(None), _LECTURES_PAR_TITRE,
+        )
         .join(Track, Track.id == QueueItem.track_id)
         .join(Album, Album.id == Track.album_id)
         .join(Artist, Artist.id == Track.artist_id)
@@ -45,9 +52,11 @@ def _items_out(db: DbSession, session: Session) -> list[QueueItemOut]:
             position=item.position,
             added_by=item.added_by,
             added_at=item.added_at,
-            track=_track_out(track, album.title, album.cover_file, artist.name, paroles),
+            track=_track_out(
+                track, album.title, album.cover_file, artist.name, paroles, lectures
+            ),
         )
-        for item, track, album, artist, paroles in rows
+        for item, track, album, artist, paroles, lectures in rows
     ]
 
 
@@ -86,10 +95,36 @@ def _get_item(db: DbSession, session: Session, item_id: int) -> QueueItem:
     return item
 
 
+# Position du titre courant, et nombre de titres qui le suivent.
+#
+# `correlate(Session)` n'est pas decoratif : il dit que SEUL `sessions` vient
+# de la requete englobante. `queue_items` obtient donc son propre FROM dans la
+# sous-requete, sans se faire happer par la jointure que `list_sessions` a
+# deja sur cette table pour compter la file.
+_POSITION_COURANTE = (
+    select(QueueItem.position)
+    .where(QueueItem.id == Session.current_item_id)
+    .correlate(Session)
+    .scalar_subquery()
+)
+
+# `coalesce(..., -1)` couvre la session qui n'a pas encore de titre courant :
+# tout est alors « a suivre », ce qui est exactement le cas.
+_A_SUIVRE = (
+    select(func.count(QueueItem.id))
+    .where(
+        QueueItem.session_id == Session.id,
+        QueueItem.position > func.coalesce(_POSITION_COURANTE, -1),
+    )
+    .correlate(Session)
+    .scalar_subquery()
+)
+
+
 @router.get("", response_model=list[SessionOut])
 def list_sessions(user: CurrentUser, db: DbSession = Depends(get_db)) -> list[SessionOut]:
     rows = db.execute(
-        select(Session, func.count(QueueItem.id))
+        select(Session, func.count(QueueItem.id), _A_SUIVRE)
         .outerjoin(QueueItem, QueueItem.session_id == Session.id)
         .group_by(Session.id)
         .order_by(Session.name)
@@ -102,8 +137,10 @@ def list_sessions(user: CurrentUser, db: DbSession = Depends(get_db)) -> list[Se
             created_at=session.created_at,
             snapcast_stream_id=session.snapcast_stream_id,
             item_count=count,
+            is_playing=session.is_playing,
+            upcoming_count=a_suivre,
         )
-        for session, count in rows
+        for session, count, a_suivre in rows
     ]
 
 
@@ -215,6 +252,19 @@ def clear_queue(
 ) -> SessionDetail:
     session = _get(db, session_id)
     queue_service.clear(db, session, keep_current=keep_current)
+    db.commit()
+    db.refresh(session)
+    return _detail(db, session)
+
+
+@router.post("/{session_id}/queue/shuffle", response_model=SessionDetail)
+def shuffle_queue(
+    session_id: int, user: CurrentUser, db: DbSession = Depends(get_db)
+) -> SessionDetail:
+    """Rebat la suite de la file. La lecture en cours n'est pas interrompue :
+    seules changent les positions des titres qui viennent apres elle."""
+    session = _get(db, session_id)
+    queue_service.shuffle_upcoming(db, session)
     db.commit()
     db.refresh(session)
     return _detail(db, session)

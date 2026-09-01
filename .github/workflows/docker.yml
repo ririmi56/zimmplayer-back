@@ -5,7 +5,10 @@ name: Docker
 # `packages: write` ci-dessous.
 on:
   push:
-    branches: [master]
+    # `1.1` est la branche de la version mineure en cours. Elle publie une
+    # image `1.1.0-dev`, jamais `latest` : celui-ci suit master et ne doit
+    # pas se mettre a pointer du code non fusionne.
+    branches: [master, "1.1"]
     tags: ["v*.*.*"]
   workflow_dispatch:
 
@@ -37,6 +40,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=1.1.0-dev,enable=${{ github.ref == 'refs/heads/1.1' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=,format=short

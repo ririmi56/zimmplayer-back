@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import CurrentUser, user_row
 from app.db import get_db
-from app.models import Album, AlbumFavorite, Artist, Track, TrackLike
+from app.models import Album, AlbumFavorite, Artist, Listen, Track, TrackLike
 from app.schemas import (
     AlbumDetail,
     AlbumOut,
@@ -73,7 +73,9 @@ _ARTIST_SELECT = (
 # l'autre, et le defilement infini afficherait alors des doublons tout en
 # sautant d'autres albums. Il ne se retourne jamais : il n'est la que pour
 # rendre l'ordre stable.
-AlbumSort = Literal["artiste", "titre", "annee", "ajout", "genre", "likes", "favoris"]
+AlbumSort = Literal[
+    "artiste", "titre", "annee", "ajout", "genre", "likes", "favoris", "lectures"
+]
 
 # Sous-requete correlee plutot qu'une jointure de plus : joindre `track_likes`
 # a `_ALBUM_SELECT` multiplierait les lignes `tracks` par leurs likes, et le
@@ -99,6 +101,17 @@ _FAVORIS_PAR_ALBUM = (
 #: Par tri : la cle principale, son sens par defaut, puis les cles de
 #: departage. Seule la principale se retourne — inverser « Artiste » doit
 #: remonter les Z, pas rejouer les discographies a l'envers.
+# Somme des ecoutes des titres de l'album. Meme precaution que les autres
+# comptes : une sous-requete correlee, jamais une jointure.
+_LECTURES_PAR_ALBUM = (
+    select(func.count(Listen.id))
+    .select_from(Listen)
+    .join(Track, Track.id == Listen.track_id)
+    .where(Track.album_id == Album.id)
+    .correlate(Album)
+    .scalar_subquery()
+)
+
 _ALBUM_ORDERS: dict[str, tuple] = {
     "artiste": (Artist.name, False, [Album.year.is_(None), Album.year]),
     "titre": (Album.title, False, []),
@@ -112,6 +125,10 @@ _ALBUM_ORDERS: dict[str, tuple] = {
     # Combien de personnes ont mis CET album en favori — a ne pas confondre
     # avec « likes », qui additionne les likes de ses titres.
     "favoris": (_FAVORIS_PAR_ALBUM, True, [Artist.name]),
+    # Somme des ecoutes de ses titres. En sens inverse (`reverse=true`), ce
+    # sont les albums que personne n'ecoute qui remontent — de quoi reperer
+    # ce qui ne merite plus sa place dans le bucket.
+    "lectures": (_LECTURES_PAR_ALBUM, True, [Artist.name]),
 }
 
 #: Tris dont la cle principale peut manquer. Le test de nullite passe AVANT
@@ -136,8 +153,28 @@ _ALBUM_SELECT = (
 
 # `lyrics` est une colonne differee : on ne remonte que sa presence, jamais son
 # contenu, pour ne pas charger des kilo-octets de texte dans chaque liste.
+# Nombre d'ecoutes d'un titre. Sous-requete correlee, comme pour les likes :
+# joindre `listens` multiplierait les lignes `tracks`.
+#
+# Une ecoute est comptee PAR PERSONNE : un titre passe en session a trois en
+# vaut trois. C'est le meme comptage que la page Statistiques, et le choix
+# assume — trois personnes l'ont bien entendu.
+_LECTURES_PAR_TITRE = (
+    select(func.count(Listen.id))
+    .where(Listen.track_id == Track.id)
+    .correlate(Track)
+    .scalar_subquery()
+)
+
 _TRACK_SELECT = (
-    select(Track, Album.title, Album.cover_file, Artist.name, Track.lyrics.is_not(None))
+    select(
+        Track,
+        Album.title,
+        Album.cover_file,
+        Artist.name,
+        Track.lyrics.is_not(None),
+        _LECTURES_PAR_TITRE,
+    )
     .join(Album, Album.id == Track.album_id)
     .join(Artist, Artist.id == Track.artist_id)
 )
@@ -169,6 +206,7 @@ def _track_out(
     cover_file: str | None,
     artist_name: str,
     has_lyrics: bool = False,
+    listen_count: int = 0,
 ) -> TrackOut:
     return TrackOut(
         id=track.id,
@@ -185,6 +223,7 @@ def _track_out(
         has_cover=cover_file is not None,
         genre=track.genre,
         has_lyrics=bool(has_lyrics),
+        listen_count=listen_count,
         overrides=track.overrides or {},
     )
 

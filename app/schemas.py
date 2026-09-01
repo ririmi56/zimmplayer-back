@@ -56,6 +56,10 @@ class TrackOut(BaseModel):
     # Les paroles ne sont pas embarquees ici : elles sont volumineuses et
     # servies a la demande par /api/tracks/{id}/lyrics.
     has_lyrics: bool = False
+    #: Nombre d'ecoutes, toutes personnes confondues : un titre passe en
+    #: session a trois en vaut trois. Zero se lit tel quel — c'est ce qui
+    #: permet de reperer ce que personne n'ecoute.
+    listen_count: int = 0
     overrides: dict[str, Any] = {}
 
 
@@ -147,6 +151,12 @@ class SessionOut(BaseModel):
     created_at: UtcDatetime
     snapcast_stream_id: str | None
     item_count: int = 0
+    #: Pour signaler d'un coup d'oeil, depuis la liste, celles qui jouent.
+    is_playing: bool = False
+    #: Titres restant a lire APRES le titre courant — la meme definition que
+    #: le « N titres a suivre » de la page Lecture. Sans titre courant, toute
+    #: la file est a suivre.
+    upcoming_count: int = 0
 
 
 class SessionDetail(SessionOut):

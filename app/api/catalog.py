@@ -2,7 +2,7 @@ import re
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import Select, func, select, text
+from sqlalchemy import Select, case, func, select, text
 from sqlalchemy.orm import Session
 
 from app.auth import CurrentUser, user_row
@@ -56,7 +56,17 @@ def _paginate(db: Session, stmt: Select, limit: int, offset: int) -> tuple[list,
 
 
 _ARTIST_SELECT = (
-    select(Artist, func.count(func.distinct(Album.id)))
+    select(
+        Artist,
+        # Albums et singles sont deux sorties distinctes : compter les unes
+        # dans les autres ferait afficher « 5 albums » pour 3 albums + 2 singles.
+        func.count(
+            func.distinct(case((Album.release_type == "album", Album.id)))
+        ),
+        func.count(
+            func.distinct(case((Album.release_type == "single", Album.id)))
+        ),
+    )
     .outerjoin(Album, Album.artist_id == Artist.id)
     .group_by(Artist.id)
 )
@@ -74,6 +84,11 @@ _ARTIST_SELECT = (
 # sautant d'autres albums. Il ne se retourne jamais : il n'est la que pour
 # rendre l'ordre stable.
 AlbumSort = Literal["artiste", "titre", "annee", "ajout", "genre", "likes", "favoris"]
+
+#: Filtre de la liste des albums. `all` reste le defaut de l'API : un client
+#: ancien continue de voir tout le catalogue ; l'interface, elle, demande
+#: explicitement les albums ou les singles.
+ReleaseTypeFilter = Literal["album", "single", "all"]
 
 # Sous-requete correlee plutot qu'une jointure de plus : joindre `track_likes`
 # a `_ALBUM_SELECT` multiplierait les lignes `tracks` par leurs likes, et le
@@ -143,8 +158,13 @@ _TRACK_SELECT = (
 )
 
 
-def _artist_out(artist: Artist, album_count: int) -> ArtistOut:
-    return ArtistOut(id=artist.id, name=artist.name, album_count=album_count)
+def _artist_out(artist: Artist, album_count: int, single_count: int) -> ArtistOut:
+    return ArtistOut(
+        id=artist.id,
+        name=artist.name,
+        album_count=album_count,
+        single_count=single_count,
+    )
 
 
 def _album_out(
@@ -156,6 +176,7 @@ def _album_out(
         year=album.year,
         artist_id=album.artist_id,
         artist_name=artist_name,
+        release_type=album.release_type,
         has_cover=album.cover_file is not None,
         track_count=track_count,
         genre=genre,
@@ -237,6 +258,7 @@ def list_albums(
     q: str | None = None,
     artist_id: int | None = None,
     genre: str | None = None,
+    release_type: ReleaseTypeFilter = "all",
     sort: AlbumSort = "artiste",
     reverse: bool = False,
     favoris: bool = False,
@@ -256,6 +278,8 @@ def list_albums(
         )
     if artist_id is not None:
         stmt = stmt.where(Album.artist_id == artist_id)
+    if release_type != "all":
+        stmt = stmt.where(Album.release_type == release_type)
     if genre:
         stmt = stmt.where(
             Album.id.in_(select(Track.album_id).where(Track.genre == genre))

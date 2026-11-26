@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
@@ -18,7 +18,9 @@ class ArtistOut(BaseModel):
 
     id: int
     name: str
+    #: Albums et singles sont deux sorties distinctes : l'interface les separe.
     album_count: int = 0
+    single_count: int = 0
 
 
 class AlbumOut(BaseModel):
@@ -29,6 +31,8 @@ class AlbumOut(BaseModel):
     year: int | None
     artist_id: int
     artist_name: str
+    #: `album` ou `single` — un single est une sortie a part entiere.
+    release_type: Literal["album", "single"]
     has_cover: bool
     track_count: int = 0
     genre: str | None = None
@@ -301,7 +305,9 @@ class FormatCount(BaseModel):
 
 class CatalogueStats(BaseModel):
     tracks: int
+    #: Albums complets et singles sont comptes separement.
     albums: int
+    singles: int
     artists: int
     total_seconds: float
     total_bytes: int

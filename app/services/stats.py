@@ -150,7 +150,14 @@ def catalogue(db: DbSession) -> dict:
     ).all()
     return {
         "tracks": db.scalar(select(func.count(Track.id))) or 0,
-        "albums": db.scalar(select(func.count(Album.id))) or 0,
+        # Albums et singles sont deux sorties distinctes : le total « albums »
+        # ne doit pas gonfler a chaque single importe.
+        "albums": db.scalar(
+            select(func.count(Album.id)).where(Album.release_type == "album")
+        ) or 0,
+        "singles": db.scalar(
+            select(func.count(Album.id)).where(Album.release_type == "single")
+        ) or 0,
         "artists": db.scalar(select(func.count(Artist.id))) or 0,
         "total_seconds": float(total_s),
         "total_bytes": int(db.scalar(select(func.coalesce(func.sum(Track.size_bytes), 0))) or 0),

@@ -68,6 +68,7 @@ class TestFichiersZimmporter:
         assert tags.album_artist == "Daft Punk"
         assert tags.disc_no is None
         assert tags.genre == "Electronic"
+        assert tags.is_single is False
         assert extract_embedded_cover(path) == tiny_jpeg
 
     def test_genre_itunes_et_paroles_lrclib(self, make_audio):
@@ -125,6 +126,28 @@ class TestFichiersZimmporter:
         path = make_audio("m4a")
         write_zimmporter_tags(path, {"title": "T", "artist": "A", "album": "B", "date": ""})
         assert read_tags(path, "A/B/T.m4a").year is None
+
+    def test_single_detecte_par_le_dossier(self, make_audio):
+        """Un fichier dans `Artiste/Singles/` est une sortie a part entiere."""
+        path = make_audio("m4a")
+        write_zimmporter_tags(
+            path,
+            {"title": "My Single", "artist": "A", "album": "Singles", "date": "2024"},
+        )
+        tags = read_tags(path, "A/Singles/My Single.m4a")
+
+        assert tags.is_single is True
+        assert tags.album == "Singles"
+        assert tags.track_no is None
+        assert tags.year == 2024
+
+    def test_album_nomme_singles_hors_dossier_reste_un_album(self, make_audio):
+        """Le dossier fait foi : un album intitule « Singles » n'est pas un single."""
+        path = make_audio("m4a")
+        write_zimmporter_tags(
+            path, {"title": "T", "artist": "A", "album": "Singles"}
+        )
+        assert read_tags(path, "A/Singles (compilation)/01 - T.m4a").is_single is False
 
     def test_tags_absents_repli_sur_la_cle_zimmporter(self, make_audio):
         """Si l'enrichissement a echoue, la cle porte encore l'information."""

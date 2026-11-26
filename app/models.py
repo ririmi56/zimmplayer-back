@@ -47,17 +47,30 @@ class Artist(Base):
 class Album(Base):
     __tablename__ = "albums"
     __table_args__ = (
-        Index("uq_albums_artist_source_title", "artist_id", "source_title", unique=True),
+        Index(
+            "uq_albums_artist_release_title",
+            "artist_id",
+            "release_type",
+            "source_title",
+            unique=True,
+        ),
         Index("ft_albums_title", "title", mysql_prefix="FULLTEXT"),
+        Index("ix_albums_release_type", "release_type"),
     )
 
     EDITABLE_FIELDS = frozenset({"title", "year"})
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     artist_id: Mapped[int] = mapped_column(ForeignKey("artists.id", ondelete="CASCADE"))
+    # `album` (sortie complete) ou `single` (un fichier = une sortie dans le
+    # dossier `Singles/` de zimmporter). Fait partie de l'identite : un single
+    # peut porter le meme titre qu'un album sans le rejoindre.
+    release_type: Mapped[str] = mapped_column(String(16), default="album")
     # `source_title` porte en plus l'identite de l'album : c'est sur lui que
     # porte la contrainte d'unicite, si bien qu'un album renomme a la main reste
-    # reconnu lors des rescans au lieu d'etre duplique.
+    # reconnu lors des rescans au lieu d'etre duplique. Pour un single, c'est le
+    # titre du morceau : zimmporter range tous les singles d'un artiste dans un
+    # meme dossier, donc le fichier — et non le dossier — est la sortie.
     source_title: Mapped[str] = mapped_column(String(255))
     source_year: Mapped[int | None] = mapped_column(Integer)
     title: Mapped[str] = mapped_column(String(255))

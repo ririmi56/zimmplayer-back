@@ -84,15 +84,21 @@ def _get_or_create_artist(session: Session, name: str, mbid: str | None) -> Arti
 
 
 def _get_or_create_album(session: Session, artist: Artist, tags: TrackTags) -> Album:
-    source_title = tags.album[:255]
+    release_type = "single" if tags.is_single else "album"
+    # Pour un single, le fichier est la sortie : son titre porte l'identite de
+    # l'album, pas le dossier `Singles/` partage par tous les singles.
+    source_title = (tags.title if tags.is_single else tags.album)[:255]
     album = session.scalar(
         select(Album).where(
-            Album.artist_id == artist.id, Album.source_title == source_title
+            Album.artist_id == artist.id,
+            Album.release_type == release_type,
+            Album.source_title == source_title,
         )
     )
     if album is None:
         album = Album(
             artist_id=artist.id,
+            release_type=release_type,
             source_title=source_title,
             source_year=tags.year,
             title=source_title,

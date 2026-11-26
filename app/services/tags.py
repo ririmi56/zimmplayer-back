@@ -41,6 +41,9 @@ class TrackTags:
     artist_mbid: str | None
     genre: str | None
     lyrics: str | None
+    # Un fichier range dans `Artiste/Singles/` est une sortie a part entiere,
+    # meme si zimmporter partage le dossier entre tous les singles de l'artiste.
+    is_single: bool = False
 
 
 def _clean(value: object) -> str | None:
@@ -175,4 +178,7 @@ def read_tags(path: Path, object_key: str) -> TrackTags:
         or _tag(audio, "musicbrainz_artistid"),
         genre=(_tag(audio, "genre") or None),
         lyrics=read_lyrics(path),
+        # Le dossier fait foi : un album qui s'appellerait « Singles » mais
+        # range dans son propre dossier reste un album.
+        is_single=(path_album or "").casefold() == "singles",
     )

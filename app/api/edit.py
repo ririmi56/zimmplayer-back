@@ -94,6 +94,7 @@ def update_album(
         year=album.year,
         artist_id=album.artist_id,
         artist_name=artist.name,
+        release_type=album.release_type,
         has_cover=album.cover_file is not None,
         track_count=len(album.tracks),
         overrides=album.overrides or {},

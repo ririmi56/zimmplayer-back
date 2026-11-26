@@ -9,7 +9,9 @@ sœur [`zimmplayer-front`](https://github.com/ririmi56/zimmplayer-front) ;
 l'orchestration Docker Compose et le livrable airgap, dans
 [`zimmplayer-deploy`](https://github.com/ririmi56/zimmplayer-deploy).
 
-Le bucket est organisé en `Artiste/Album/NN - Titre.ext`. Les métadonnées
+Le bucket est organisé en `Artiste/Album/NN - Titre.ext`. Les singles de
+zimmporter vivent à part, dans `Artiste/Singles/Titre.ext` (voir
+[Singles](#singles)). Les métadonnées
 embarquées dans les fichiers sont indexées une fois en base, ce qui permet de
 servir le catalogue sans jamais relister le bucket ; l'audio, lui, est streamé
 à la demande.
@@ -130,6 +132,24 @@ normal ne relira jamais un fichier inchangé.
 À noter : quand un album n'a aucune pochette, `covers.find_folder_cover` tente
 5 clés (`cover.jpg`, `folder.jpg`…) pour **chaque** piste de cet album. Ce sont
 des 404, donc pas de transfert, mais ce n'est pas gratuit.
+
+### Singles
+
+zimmporter range tous les singles d'un artiste dans un même dossier :
+`Artiste/Singles/Titre.ext`, avec le tag `album` à `Singles` et sans numéro de
+piste. Le scanner ne s'arrête pas à ce dossier partagé : **chaque fichier est
+une sortie à part entière**. Il crée donc un album de type `single` par fichier,
+avec le titre du morceau et sa pochette embarquée. L'interface les sépare des
+albums (filtre de la bibliothèque, section « Singles » de la page artiste), et
+les statistiques comptent albums et singles séparément.
+
+Un album et un single peuvent porter le même titre chez le même artiste sans se
+confondre : le type de sortie fait partie de l'identité de l'album.
+
+Après une mise à jour depuis une version qui agrégeait les singles en un seul
+album « Singles », les migrations effacent l'ETag de ces pistes. Un **scan
+normal** suffit alors à les éclater : il ne relit que les singles, sans scan
+forcé. Tant que ce scan n'a pas tourné, l'ancien album agrégé reste affiché.
 
 ## Sessions d'écoute et Snapcast
 
